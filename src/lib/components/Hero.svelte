@@ -1,0 +1,67 @@
+<script lang="ts">
+	const tags = ['Branding', 'Diseño', 'Web', 'Dirección de arte', 'Ilustración'];
+</script>
+
+<section id="inicio" class="relative overflow-hidden px-5 pt-32 pb-20 sm:px-8 sm:pt-40 sm:pb-28">
+	<!-- decorative blob -->
+	<div
+		class="pointer-events-none absolute -top-24 right-[-10%] h-[28rem] w-[28rem] rounded-full bg-lime/40 blur-3xl"
+	></div>
+
+	<div class="relative mx-auto max-w-7xl">
+		<p class="float-up mb-6 flex items-center gap-2 text-sm font-semibold tracking-wide text-muted uppercase">
+			<span class="inline-block h-2 w-2 rounded-full bg-lime"></span>
+			Estudio creativo · disponible para proyectos
+		</p>
+
+		<h1
+			class="float-up max-w-5xl text-[3.2rem] leading-[0.95] font-extrabold tracking-tight sm:text-7xl lg:text-[7.5rem]"
+			style="font-family: var(--font-display)"
+		>
+			Ideas con <span class="italic text-ink-soft">carácter</span>,
+			marcas que <span class="bg-lime px-3 -rotate-1 inline-block rounded-lg">pegan</span>.
+		</h1>
+
+		<p class="float-up mt-8 max-w-xl text-lg text-ink-soft sm:text-xl">
+			Somos Moco. Diseñamos identidades, sitios y piezas que hacen que la gente
+			frene el scroll y se acuerde de vos.
+		</p>
+
+		<div class="float-up mt-10 flex flex-wrap items-center gap-4">
+			<a
+				href="/contacto"
+				class="rounded-full bg-ink px-7 py-4 text-base font-semibold text-cream transition-all hover:bg-lime hover:text-ink"
+				>Empecemos un proyecto</a
+			>
+			<a
+				href="/trabajos"
+				class="rounded-full border border-ink/20 px-7 py-4 text-base font-semibold transition-all hover:border-ink hover:bg-ink hover:text-cream"
+				>Ver trabajos</a
+			>
+		</div>
+
+		<div class="mt-14 flex flex-wrap gap-2">
+			{#each tags as tag}
+				<span
+					class="rounded-full border border-ink/15 bg-cream-dark/40 px-4 py-1.5 text-sm font-medium text-ink-soft"
+					>{tag}</span
+				>
+			{/each}
+		</div>
+	</div>
+</section>
+
+<!-- Marquee -->
+<div class="overflow-hidden border-y border-ink/10 bg-ink py-4 text-cream">
+	<div class="flex w-max animate-marquee gap-8 whitespace-nowrap text-2xl font-extrabold sm:text-3xl" style="font-family: var(--font-display)">
+		{#each Array(2) as _}
+			<span class="flex items-center gap-8">
+				<span>Branding</span><span class="text-lime">✦</span>
+				<span>Diseño Web</span><span class="text-lime">✦</span>
+				<span>Identidad Visual</span><span class="text-lime">✦</span>
+				<span>Dirección de Arte</span><span class="text-lime">✦</span>
+				<span>Packaging</span><span class="text-lime">✦</span>
+			</span>
+		{/each}
+	</div>
+</div>
