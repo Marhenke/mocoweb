@@ -21,11 +21,8 @@
 	}
 
 	const words = [
-		'Una', 'marca', 'no', 'se', 'trata', 'solo', 'de', 'verse',
-		'linda:', 'se', 'trata', 'de', 'hacerse', 'recordar.',
-		'Diseñamos', 'con', 'intención,', 'con', 'humor', 'y', 'con',
-		'obsesión', 'por', 'el', 'detalle,', 'para', 'que', 'la', 'tuya',
-		'no', 'pase', 'desapercibida.',
+		'El', 'mundo', 'merece', 'conocerte,', 'nosotros', 'te',
+		'podemos', 'ayudar.',
 	];
 </script>
 

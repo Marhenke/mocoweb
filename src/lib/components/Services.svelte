@@ -12,13 +12,13 @@
 		},
 		{
 			n: '03',
-			title: 'Dirección de Arte',
-			desc: 'Campañas, contenido para redes y piezas gráficas con una estética que se reconoce de lejos.'
+			title: 'AV & Produs',
+			desc: 'Audiovisual y producción: foto, video y contenido para redes con mirada de autor, listo para compartir.'
 		},
 		{
 			n: '04',
-			title: 'Producción & Cobertura de eventos',
-			desc: 'Llevamos las ideas al mundo real y registramos tus eventos con mirada de autor: producción, foto, video y contenido listo para compartir.'
+			title: 'Cobertura de eventos',
+			desc: 'Registramos tus eventos de principio a fin, capturando los momentos que importan.'
 		}
 	];
 </script>
@@ -32,7 +32,7 @@
 					class="max-w-2xl text-4xl font-extrabold tracking-tight sm:text-6xl"
 					style="font-family: var(--font-display)"
 				>
-					Servicios para que tu marca diga presente.
+					¿Qué necesitás?
 				</h2>
 			</div>
 		</div>

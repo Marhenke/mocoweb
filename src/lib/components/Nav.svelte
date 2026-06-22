@@ -17,6 +17,11 @@
 	const isActive = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 
+	// Páginas con hero oscuro arriba de todo (home con video, nosotros con
+	// fondo negro): mientras no se hizo scroll, el menú usa texto claro.
+	const darkHero = $derived(page.url.pathname === '/' || page.url.pathname === '/nosotros');
+	const overHero = $derived(darkHero && !scrolled);
+
 	$effect(() => {
 		const onScroll = () => (scrolled = window.scrollY > 20);
 		onScroll();
@@ -40,8 +45,9 @@
 			>
 				m
 			</span>
-			<span class="text-xl font-extrabold tracking-tight" style="font-family: var(--font-display)"
-				>moco</span
+			<span
+				class="text-xl font-extrabold tracking-tight transition-colors {overHero ? 'text-cream' : ''}"
+				style="font-family: var(--font-display)">moco</span
 			>
 		</a>
 
@@ -49,17 +55,18 @@
 			{#each links as link}
 				<a
 					href={link.href}
-					class="relative text-sm font-medium transition-colors hover:text-ink after:absolute after:-bottom-1 after:left-0 after:h-0.5 after:bg-lime after:transition-all hover:after:w-full {isActive(
-						link.href
-					)
-						? 'text-ink after:w-full'
-						: 'text-ink-soft after:w-0'}">{link.label}</a
+					class="relative text-sm font-medium transition-colors after:absolute after:-bottom-1 after:left-0 after:h-0.5 after:bg-lime after:transition-all hover:after:w-full {overHero
+						? 'text-cream/80 hover:text-cream'
+						: 'hover:text-ink'} {isActive(link.href)
+						? (overHero ? 'text-cream' : 'text-ink') + ' after:w-full'
+						: (overHero ? '' : 'text-ink-soft') + ' after:w-0'}">{link.label}</a
 				>
 			{/each}
 			<a
 				href="/contacto"
-				class="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-cream transition-all hover:bg-lime hover:text-ink"
-				>Hablemos</a
+				class="rounded-full px-5 py-2.5 text-sm font-semibold transition-all {overHero
+					? 'bg-cream text-ink hover:bg-lime'
+					: 'bg-ink text-cream hover:bg-lime hover:text-ink'}">Hablemos</a
 			>
 		</div>
 
@@ -70,13 +77,16 @@
 		>
 			<div class="flex flex-col gap-1.5">
 				<span
-					class="h-0.5 w-6 bg-ink transition-all"
+					class="h-0.5 w-6 transition-all {overHero && !open ? 'bg-cream' : 'bg-ink'}"
 					class:translate-y-2={open}
 					class:rotate-45={open}
 				></span>
-				<span class="h-0.5 w-6 bg-ink transition-all" class:opacity-0={open}></span>
 				<span
-					class="h-0.5 w-6 bg-ink transition-all"
+					class="h-0.5 w-6 transition-all {overHero && !open ? 'bg-cream' : 'bg-ink'}"
+					class:opacity-0={open}
+				></span>
+				<span
+					class="h-0.5 w-6 transition-all {overHero && !open ? 'bg-cream' : 'bg-ink'}"
 					class:-translate-y-2={open}
 					class:-rotate-45={open}
 				></span>

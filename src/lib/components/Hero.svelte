@@ -22,11 +22,11 @@
 		</p>
 
 		<h1
-			class="float-up max-w-5xl text-[3.2rem] leading-[0.95] font-extrabold tracking-tight sm:text-7xl lg:text-[7.5rem]"
+			class="float-up max-w-5xl text-[clamp(2rem,8.5vw,7.5rem)] leading-[0.95] font-extrabold tracking-tight"
 			style="font-family: var(--font-display)"
 		>
-			Ideas con <span class="italic text-cream/70">carácter</span>,
-			marcas que <span class="bg-lime px-3 -rotate-1 inline-block rounded-lg text-ink">pegan</span>.
+			Hola, somos Moco.<br />
+			<span class="whitespace-nowrap">contenido <span class="bg-lime text-ink inline-block -rotate-2 rounded-2xl px-4 pb-2">pegajoso</span></span>
 		</h1>
 
 		<div class="float-up mt-10 flex flex-wrap items-center gap-4">

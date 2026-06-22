@@ -4,20 +4,24 @@
 
 	const values = [
 		{
-			title: 'Curiosidad',
-			desc: 'Preguntamos mucho antes de diseñar. Entender el problema es la mitad del trabajo.'
+			title: 'Explorar',
+			desc: 'Nos gusta descubrir lo que hay detrás de cada proyecto. Las mejores ideas aparecen cuando hacemos las preguntas correctas.'
 		},
 		{
-			title: 'Detalle',
-			desc: 'Nos importa el kerning, el espacio, el píxel. Las cosas bien hechas se notan.'
+			title: 'Conexión',
+			desc: 'Trabajamos desde lo humano. Entender a las personas detrás de una marca es parte de crear algo verdadero.'
 		},
 		{
-			title: 'Honestidad',
-			desc: 'Te decimos lo que pensamos, aunque no sea lo más cómodo. Para eso nos contratás.'
+			title: 'Ideas con sentido',
+			desc: 'No buscamos hacer por hacer. Buscamos que cada decisión tenga una razón y que cada proyecto tenga algo para decir.'
 		},
 		{
-			title: 'Carácter',
-			desc: 'No hacemos marcas tibias. Buscamos que la tuya tenga una voz propia.'
+			title: 'Movimiento',
+			desc: 'Pensamos rápido, probamos, ajustamos y avanzamos. La creatividad también está en hacer que las cosas pasen.'
+		},
+		{
+			title: 'Identidad',
+			desc: 'Cada proyecto tiene algo único. Nuestro trabajo es encontrarlo y darle una forma propia.'
 		}
 	];
 
@@ -57,24 +61,27 @@
 	<meta name="description" content="Moco es un estudio creativo independiente. Conocé cómo trabajamos." />
 </svelte:head>
 
-<!-- Hero: texto a la izquierda, espacio para foto a la derecha -->
-<header class="px-5 pt-32 pb-20 sm:px-8 sm:pt-40 sm:pb-28">
-	<div class="mx-auto grid max-w-7xl gap-10 lg:grid-cols-2 lg:gap-16">
-		<div class="float-up flex flex-col">
-			<p class="mb-5 flex items-center gap-2 text-sm font-semibold tracking-wide text-muted uppercase">
+<!-- Hero: texto a 2/3, espacio para foto a la derecha -->
+<header class="bg-ink px-5 pt-32 pb-28 text-cream sm:px-8 sm:pt-40 sm:pb-36">
+	<div class="mx-auto grid max-w-7xl gap-10 lg:grid-cols-3 lg:gap-16">
+		<div class="float-up flex flex-col lg:col-span-2">
+			<p class="mb-5 flex items-center gap-2 text-sm font-semibold tracking-wide text-cream/70 uppercase">
 				<span class="inline-block h-2 w-2 rounded-full bg-lime"></span>
 				El estudio
 			</p>
 			<h1
-				class="text-[2.8rem] leading-[0.95] font-extrabold tracking-tight sm:text-7xl"
+				class="text-[2.8rem] leading-[0.95] font-extrabold tracking-tight sm:text-6xl"
 				style="font-family: var(--font-display)"
 			>
-				Chico, curioso y obsesionado con el detalle.
+				Un estudio creativo que encuentra sentido y lo transforma en realidad.
 			</h1>
-			<p class="mt-6 text-lg text-ink-soft sm:text-xl">
-				Somos Moco, un estudio creativo independiente. Trabajamos de cerca con cada cliente, sin
-				intermediarios ni fórmulas: entendemos tu proyecto, lo cuestionamos un poco, y lo
-				convertimos en algo con personalidad propia.
+			<p class="mt-6 text-lg text-cream/80 sm:text-xl">
+				Somos Moco, un estudio creativo independiente. Trabajamos cerca de cada proyecto para
+				entender su esencia, descubrir oportunidades y construir soluciones con identidad propia.
+			</p>
+			<p class="mt-4 text-lg text-cream/80 sm:text-xl">
+				Nos involucramos en el proceso, combinando estrategia, diseño y creatividad para
+				transformar ideas en marcas que conectan.
 			</p>
 		</div>
 
@@ -84,12 +91,12 @@
 </header>
 
 <!-- Valores -->
-<section class="px-5 pb-20 sm:px-8 sm:pb-28">
+<section class="px-5 pt-20 pb-20 sm:px-8 sm:pt-28 sm:pb-28">
 	<div class="mx-auto max-w-7xl">
 		<h2 class="mb-10 text-3xl font-extrabold tracking-tight sm:text-5xl" style="font-family: var(--font-display)">
 			En qué creemos
 		</h2>
-		<div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+		<div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
 			{#each values as v}
 				<div class="rounded-3xl border border-ink/10 bg-cream-dark/30 p-7">
 					<h3 class="text-xl font-bold" style="font-family: var(--font-display)">{v.title}</h3>
