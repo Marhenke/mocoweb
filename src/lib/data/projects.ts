@@ -1,3 +1,7 @@
+export type GalleryItem =
+	| string // gradiente CSS (legacy)
+	| { src: string; wide: boolean }; // imagen real: wide=true ocupa 2 columnas
+
 export type Project = {
 	slug: string;
 	title: string;
@@ -5,38 +9,45 @@ export type Project = {
 	year: string;
 	client: string;
 	services: string[];
-	/** Color de fondo de la tarjeta/portada (placeholder hasta tener fotos) */
+	/** Color o URL de imagen para la tarjeta en la grilla */
 	bg: string;
+	/** URL de imagen para la portada en el detalle (si no se define, usa bg) */
+	cover?: string;
 	/** Color de texto sobre ese fondo */
 	ink: string;
 	summary: string;
 	challenge: string;
 	solution: string;
-	/** Bloques de la galería — placeholders hasta cargar imágenes reales */
-	gallery: string[];
+	gallery: GalleryItem[];
 };
 
 export const projects: Project[] = [
 	{
-		slug: 'verdeo',
-		title: 'Verdeo',
-		category: 'Branding · Packaging',
+		slug: 'sergio-castiglione',
+		title: 'Sergio Castiglione',
+		category: 'Web · CM · Producción',
 		year: '2025',
-		client: 'Verdeo Alimentos',
-		services: ['Naming', 'Identidad visual', 'Packaging', 'Guía de marca'],
-		bg: 'linear-gradient(135deg, #c8f135 0%, #aad419 100%)',
-		ink: '#16140f',
+		client: 'Sergio Castiglione',
+		services: ['Diseño web', 'Community Management', 'Producción de reels'],
+		bg: '/projects/sergio-castiglione/Portada.png',
+		cover: '/projects/sergio-castiglione/Portada.png',
+		ink: '#f4f0e6',
 		summary:
-			'Una marca de alimentos plant-based fresca y honesta, que se anima a ser distinta en la góndola.',
+			'Presencia digital integral para Sergio Castiglione: web, redes y contenido audiovisual.',
 		challenge:
-			'Verdeo necesitaba destacarse en un rubro saturado de verdes genéricos y mensajes acartonados, sin perder confianza ni claridad.',
+			'Sergio necesitaba construir una presencia online sólida y coherente, que lo represente bien en todos los canales.',
 		solution:
-			'Creamos un sistema visual jugado pero prolijo: un verde lima propio, tipografías con carácter y un lenguaje gráfico simple que funciona igual de bien en un envase que en redes.',
+			'Diseñamos su web, tomamos las riendas de sus redes y producimos reels que muestran su trabajo con la calidad que se merece.',
 		gallery: [
-			'linear-gradient(135deg, #c8f135 0%, #aad419 100%)',
-			'linear-gradient(135deg, #16140f 0%, #3a362d 100%)',
-			'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)',
-			'linear-gradient(135deg, #aad419 0%, #c8f135 100%)'
+			{ src: '/projects/sergio-castiglione/Web_Home_Mobile.png', wide: false },
+			{ src: '/projects/sergio-castiglione/Web_Home.png', wide: false },
+			{ src: '/projects/sergio-castiglione/Web_About_Tablet.png', wide: true },
+			{ src: '/projects/sergio-castiglione/Web_Archive.png', wide: true },
+			{ src: '/projects/sergio-castiglione/Web_Australis.png', wide: false },
+			{ src: '/projects/sergio-castiglione/Web_Contact_Mobile.png', wide: false },
+			{ src: '/projects/sergio-castiglione/Web_Contact.png', wide: true },
+			{ src: '/projects/sergio-castiglione/IG_Feed.png', wide: false },
+			{ src: '/projects/sergio-castiglione/IG_Profile.png', wide: false }
 		]
 	},
 	{

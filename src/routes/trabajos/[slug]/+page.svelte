@@ -1,8 +1,19 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import type { GalleryItem } from '$lib/data/projects';
 
 	let { data }: { data: PageData } = $props();
 	const { project, next } = $derived(data);
+
+	function bgStyle(val: string) {
+		return val.startsWith('/')
+			? `background-image: url(${val}); background-size: cover; background-position: center`
+			: `background: ${val}`;
+	}
+
+	function isImage(item: GalleryItem): item is { src: string; wide: boolean } {
+		return typeof item === 'object';
+	}
 </script>
 
 <svelte:head>
@@ -29,15 +40,21 @@
 	</div>
 </header>
 
-<!-- Portada (placeholder) -->
+<!-- Portada -->
 <section class="px-5 sm:px-8">
 	<div class="mx-auto max-w-7xl">
-		<div
-			class="flex aspect-[16/9] items-center justify-center rounded-3xl"
-			style="background: {project.bg}; color: {project.ink}"
-		>
-			<span class="text-sm font-semibold opacity-60">Imagen de portada</span>
-		</div>
+		{#if project.cover}
+			<img
+				src={project.cover}
+				alt="Portada {project.title}"
+				class="w-full rounded-3xl object-cover"
+			/>
+		{:else}
+			<div
+				class="aspect-[16/9] rounded-3xl"
+				style="{bgStyle(project.bg)}; color: {project.ink}"
+			></div>
+		{/if}
 	</div>
 </section>
 
@@ -84,17 +101,23 @@
 	</div>
 </section>
 
-<!-- Galería (placeholders) -->
+<!-- Galería -->
 <section class="px-5 pb-20 sm:px-8 sm:pb-28">
 	<div class="mx-auto grid max-w-7xl gap-6 sm:grid-cols-2">
-		{#each project.gallery as block, i}
-			<div
-				class="flex items-center justify-center rounded-3xl"
-				class:sm:col-span-2={i === 0}
-				style="background: {block}; aspect-ratio: {i === 0 ? '16/9' : '4/3'}; color: {project.ink}"
-			>
-				<span class="text-sm font-semibold opacity-50">Imagen {i + 1}</span>
-			</div>
+		{#each project.gallery as item}
+			{#if isImage(item)}
+				<img
+					src={item.src}
+					alt=""
+					class="w-full rounded-3xl object-cover"
+					class:sm:col-span-2={item.wide}
+				/>
+			{:else}
+				<div
+					class="rounded-3xl"
+					style="{bgStyle(item)}; aspect-ratio: 4/3;"
+				></div>
+			{/if}
 		{/each}
 	</div>
 </section>
