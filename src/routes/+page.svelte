@@ -3,6 +3,7 @@
 	import Statement from '$lib/components/Statement.svelte';
 	import Services from '$lib/components/Services.svelte';
 	import PortfolioPreview from '$lib/components/PortfolioPreview.svelte';
+	import BouncingBand from '$lib/components/BouncingBand.svelte';
 	import Contact from '$lib/components/Contact.svelte';
 </script>
 
@@ -18,4 +19,5 @@
 <Statement />
 <Services />
 <PortfolioPreview />
+<BouncingBand />
 <Contact />
