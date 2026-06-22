@@ -1,12 +1,6 @@
 <script lang="ts">
-	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Contact from '$lib/components/Contact.svelte';
-
-	const stats = [
-		{ num: '+40', label: 'Proyectos lanzados' },
-		{ num: '8', label: 'Años creando' },
-		{ num: '100%', label: 'Hecho a medida' }
-	];
+	import SocialIcon from '$lib/components/SocialIcon.svelte';
 
 	const values = [
 		{
@@ -33,6 +27,29 @@
 		['Creamos', 'Diseñamos y pulimos cada pieza con foco en el detalle.'],
 		['Lanzamos', 'Entregamos todo listo para usar, con acompañamiento.']
 	];
+
+	// Links de redes: placeholders por ahora, los reemplazamos por los reales.
+	const team = [
+		{
+			name: 'Marlene Henke',
+			role: 'Lic. en Diseño',
+			socials: [
+				{ name: 'instagram', href: 'https://instagram.com' },
+				{ name: 'tiktok', href: 'https://tiktok.com' },
+				{ name: 'youtube', href: 'https://youtube.com' }
+			]
+		},
+		{
+			name: 'Joaquín Gegenschatz',
+			role: 'Lic. en Comunicación',
+			socials: [
+				{ name: 'instagram', href: 'https://instagram.com' },
+				{ name: 'tiktok', href: 'https://tiktok.com' },
+				{ name: 'youtube', href: 'https://youtube.com' },
+				{ name: 'spotify', href: 'https://spotify.com' }
+			]
+		}
+	] as const;
 </script>
 
 <svelte:head>
@@ -40,39 +57,31 @@
 	<meta name="description" content="Moco es un estudio creativo independiente. Conocé cómo trabajamos." />
 </svelte:head>
 
-<PageHeader
-	eyebrow="El estudio"
-	title="Chico, curioso y obsesionado con el detalle."
-	intro="Somos Moco, un estudio creativo independiente. Trabajamos de cerca con cada cliente, sin intermediarios ni fórmulas."
-/>
-
-<!-- Texto + stats -->
-<section class="px-5 pb-20 sm:px-8 sm:pb-28">
-	<div class="mx-auto grid max-w-7xl gap-12 lg:grid-cols-2 lg:gap-20">
-		<div class="space-y-4 text-lg text-ink-soft">
-			<p>
-				Entendemos tu proyecto, lo cuestionamos un poco, y lo convertimos en algo con
-				personalidad propia. Nos gustan las marcas que se animan a ser distintas.
+<!-- Hero: texto a la izquierda, espacio para foto a la derecha -->
+<header class="px-5 pt-32 pb-20 sm:px-8 sm:pt-40 sm:pb-28">
+	<div class="mx-auto grid max-w-7xl gap-10 lg:grid-cols-2 lg:gap-16">
+		<div class="float-up flex flex-col">
+			<p class="mb-5 flex items-center gap-2 text-sm font-semibold tracking-wide text-muted uppercase">
+				<span class="inline-block h-2 w-2 rounded-full bg-lime"></span>
+				El estudio
 			</p>
-			<p>
-				Trabajamos en branding, diseño web, dirección de arte y packaging — siempre con la
-				misma obsesión por hacer cosas que se vean y se sientan bien.
+			<h1
+				class="text-[2.8rem] leading-[0.95] font-extrabold tracking-tight sm:text-7xl"
+				style="font-family: var(--font-display)"
+			>
+				Chico, curioso y obsesionado con el detalle.
+			</h1>
+			<p class="mt-6 text-lg text-ink-soft sm:text-xl">
+				Somos Moco, un estudio creativo independiente. Trabajamos de cerca con cada cliente, sin
+				intermediarios ni fórmulas: entendemos tu proyecto, lo cuestionamos un poco, y lo
+				convertimos en algo con personalidad propia.
 			</p>
-			<p>Si esa es tu marca, nos vamos a llevar bien.</p>
 		</div>
 
-		<div class="grid grid-cols-3 gap-6 self-start">
-			{#each stats as s}
-				<div>
-					<div class="text-3xl font-extrabold sm:text-5xl" style="font-family: var(--font-display)">
-						{s.num}
-					</div>
-					<div class="mt-1 text-sm text-muted">{s.label}</div>
-				</div>
-			{/each}
-		</div>
+		<!-- Espacio reservado para una foto a futuro -->
+		<div class="hidden lg:block" aria-hidden="true"></div>
 	</div>
-</section>
+</header>
 
 <!-- Valores -->
 <section class="px-5 pb-20 sm:px-8 sm:pb-28">
@@ -92,7 +101,7 @@
 </section>
 
 <!-- Proceso -->
-<section class="px-5 pb-24 sm:px-8 sm:pb-32">
+<section class="px-5 pb-20 sm:px-8 sm:pb-28">
 	<div class="mx-auto max-w-7xl rounded-3xl bg-ink p-8 text-cream sm:p-12">
 		<h2 class="text-3xl font-bold sm:text-4xl" style="font-family: var(--font-display)">
 			Cómo trabajamos
@@ -104,6 +113,42 @@
 					<div>
 						<div class="text-lg font-semibold">{title}</div>
 						<div class="mt-1 text-sm text-cream/70">{desc}</div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	</div>
+</section>
+
+<!-- Quiénes somos -->
+<section class="px-5 pb-24 sm:px-8 sm:pb-32">
+	<div class="mx-auto max-w-7xl">
+		<h2 class="mb-10 text-3xl font-extrabold tracking-tight sm:text-5xl" style="font-family: var(--font-display)">
+			Quiénes somos
+		</h2>
+		<div class="grid grid-cols-2 gap-5 lg:grid-cols-4">
+			{#each team as member}
+				<div>
+					<!-- Foto del integrante (placeholder hasta tener las reales) -->
+					<div
+						class="flex aspect-[4/5] w-full items-center justify-center rounded-3xl border border-ink/10 bg-cream-dark/40"
+					>
+						<span class="text-sm font-semibold text-muted">Foto</span>
+					</div>
+					<h3 class="mt-4 text-xl font-bold" style="font-family: var(--font-display)">{member.name}</h3>
+					<p class="mt-1 text-ink-soft">{member.role}</p>
+					<div class="mt-3 flex items-center gap-2">
+						{#each member.socials as social}
+							<a
+								href={social.href}
+								target="_blank"
+								rel="noopener noreferrer"
+								aria-label={social.name}
+								class="flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-ink hover:text-cream"
+							>
+								<span class="h-4 w-4"><SocialIcon name={social.name} /></span>
+							</a>
+						{/each}
 					</div>
 				</div>
 			{/each}

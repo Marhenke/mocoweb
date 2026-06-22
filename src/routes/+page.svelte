@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Hero from '$lib/components/Hero.svelte';
+	import Statement from '$lib/components/Statement.svelte';
 	import Services from '$lib/components/Services.svelte';
 	import PortfolioPreview from '$lib/components/PortfolioPreview.svelte';
 	import Contact from '$lib/components/Contact.svelte';
@@ -14,6 +15,7 @@
 </svelte:head>
 
 <Hero />
+<Statement />
 <Services />
 <PortfolioPreview />
 <Contact />

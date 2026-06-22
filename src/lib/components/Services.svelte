@@ -17,8 +17,8 @@
 		},
 		{
 			n: '04',
-			title: 'Packaging & Print',
-			desc: 'Envases, papelería y material impreso que se sienten tan bien como se ven.'
+			title: 'Producción & Cobertura de eventos',
+			desc: 'Llevamos las ideas al mundo real y registramos tus eventos con mirada de autor: producción, foto, video y contenido listo para compartir.'
 		}
 	];
 </script>
@@ -39,11 +39,14 @@
 
 		<div class="grid gap-px overflow-hidden rounded-3xl border border-ink/10 bg-ink/10 sm:grid-cols-2">
 			{#each services as s}
-				<div class="group bg-cream p-8 transition-colors hover:bg-cream-dark sm:p-10">
+				<a
+					href="/nosotros"
+					class="group bg-cream p-8 transition-colors hover:bg-cream-dark sm:p-10"
+				>
 					<div class="flex items-start justify-between">
 						<span class="text-sm font-bold text-muted">{s.n}</span>
 						<span
-							class="flex h-10 w-10 items-center justify-center rounded-full bg-ink/5 text-ink transition-all group-hover:bg-lime group-hover:rotate-45"
+							class="flex h-10 w-10 items-center justify-center rounded-full bg-ink/5 text-ink transition-all group-hover:rotate-45 group-hover:bg-lime"
 							>↗</span
 						>
 					</div>
@@ -51,7 +54,7 @@
 						{s.title}
 					</h3>
 					<p class="mt-3 max-w-md text-ink-soft">{s.desc}</p>
-				</div>
+				</a>
 			{/each}
 		</div>
 	</div>
