@@ -1,6 +1,5 @@
 <script lang="ts">
 	import type { PageData } from './$types';
-	import type { GalleryItem } from '$lib/data/projects';
 
 	let { data }: { data: PageData } = $props();
 	const { project, next } = $derived(data);
@@ -9,10 +8,6 @@
 		return val.startsWith('/')
 			? `background-image: url(${val}); background-size: cover; background-position: center`
 			: `background: ${val}`;
-	}
-
-	function isImage(item: GalleryItem): item is { src: string; wide: boolean } {
-		return typeof item === 'object';
 	}
 </script>
 
@@ -101,22 +96,67 @@
 	</div>
 </section>
 
-<!-- Galería -->
+<!-- Galería por filas: cada fila comparte alto, ancho proporcional al ratio -->
 <section class="px-5 pb-20 sm:px-8 sm:pb-28">
-	<div class="mx-auto grid max-w-7xl gap-6 sm:grid-cols-2">
-		{#each project.gallery as item}
-			{#if isImage(item)}
-				<img
-					src={item.src}
-					alt=""
-					class="w-full rounded-3xl object-cover"
-					class:sm:col-span-2={item.wide}
-				/>
+	<div class="mx-auto flex max-w-7xl flex-col gap-3">
+		{#each project.gallery as row}
+			{#if row.length === 1}
+				<!-- fila de una sola imagen/video: alineada a la izquierda, alto acotado -->
+				<div class="flex justify-start">
+					{#if row[0].video}
+						<!-- svelte-ignore a11y_media_has_caption -->
+						<video
+							src={row[0].video}
+							autoplay
+							loop
+							muted
+							playsinline
+							class="block max-h-[480px] w-auto max-w-full rounded-2xl"
+						></video>
+					{:else if row[0].src}
+						<img
+							src={row[0].src}
+							alt=""
+							class="block max-h-[480px] w-auto max-w-full rounded-2xl"
+						/>
+					{:else}
+						<div
+							class="rounded-2xl"
+							style="{bgStyle(row[0].gradient ?? '')}; height: 360px; aspect-ratio: {row[0].ratio};"
+						></div>
+					{/if}
+				</div>
 			{:else}
-				<div
-					class="rounded-3xl"
-					style="{bgStyle(item)}; aspect-ratio: 4/3;"
-				></div>
+				<div class="flex gap-3">
+					{#each row as cell}
+						{#if cell.video}
+							<!-- svelte-ignore a11y_media_has_caption -->
+							<video
+								src={cell.video}
+								autoplay
+								loop
+								muted
+								playsinline
+								class="block h-auto rounded-2xl"
+								style="flex: {cell.ratio} 1 0; min-width: 0;"
+							></video>
+						{:else if cell.src}
+							<img
+								src={cell.src}
+								alt=""
+								class="block h-auto rounded-2xl"
+								style="flex: {cell.ratio} 1 0; min-width: 0;"
+							/>
+						{:else}
+							<div
+								class="rounded-2xl"
+								style="flex: {cell.ratio} 1 0; min-width: 0; aspect-ratio: {cell.ratio}; {bgStyle(
+									cell.gradient ?? ''
+								)}"
+							></div>
+						{/if}
+					{/each}
+				</div>
 			{/if}
 		{/each}
 	</div>

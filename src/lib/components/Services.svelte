@@ -41,19 +41,22 @@
 			{#each services as s}
 				<a
 					href="/nosotros"
-					class="group bg-cream p-8 transition-colors hover:bg-cream-dark sm:p-10"
+					class="group bg-cream p-8 transition-colors hover:bg-ink sm:p-10"
 				>
 					<div class="flex items-start justify-between">
-						<span class="text-sm font-bold text-muted">{s.n}</span>
+						<span class="text-sm font-bold text-muted transition-colors group-hover:text-cream/60">{s.n}</span>
 						<span
 							class="flex h-10 w-10 items-center justify-center rounded-full bg-ink/5 text-ink transition-all group-hover:rotate-45 group-hover:bg-lime"
 							>↗</span
 						>
 					</div>
-					<h3 class="mt-6 text-2xl font-bold sm:text-3xl" style="font-family: var(--font-display)">
+					<h3
+						class="mt-6 text-2xl font-bold transition-colors group-hover:text-lime sm:text-3xl"
+						style="font-family: var(--font-display)"
+					>
 						{s.title}
 					</h3>
-					<p class="mt-3 max-w-md text-ink-soft">{s.desc}</p>
+					<p class="mt-3 max-w-md text-ink-soft transition-colors group-hover:text-cream">{s.desc}</p>
 				</a>
 			{/each}
 		</div>
