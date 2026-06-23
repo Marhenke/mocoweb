@@ -58,20 +58,29 @@ export const projects: Project[] = [
 				{ src: '/projects/sergio-castiglione/Web_About_Tablet.png', ratio: 1.25 },
 				{ src: '/projects/sergio-castiglione/Web_Archive.png', ratio: 1.25 }
 			],
-			// fila: 3 verticales
+			// fila: 3 verticales (foto + reel + foto)
 			[
 				{ src: '/projects/sergio-castiglione/Web_Home_Mobile.png', ratio: 0.666 },
-				{ src: '/projects/sergio-castiglione/Web_Home.png', ratio: 0.75 },
-				{ src: '/projects/sergio-castiglione/Web_Australis.png', ratio: 0.8 }
+				{ video: '/projects/sergio-castiglione/Reel_Japon_1.mp4', ratio: 0.5625 },
+				{ src: '/projects/sergio-castiglione/Web_Home.png', ratio: 0.75 }
 			],
-			// fila: 3 verticales
+			// fila: 3 verticales (foto + reel + foto)
 			[
-				{ src: '/projects/sergio-castiglione/Web_Contact_Mobile.png', ratio: 0.8 },
+				{ src: '/projects/sergio-castiglione/Web_Australis.png', ratio: 0.8 },
+				{ video: '/projects/sergio-castiglione/Reel_Japon_2.mp4', ratio: 0.5625 },
+				{ src: '/projects/sergio-castiglione/Web_Contact_Mobile.png', ratio: 0.8 }
+			],
+			// fila: 3 verticales (foto + reel + foto)
+			[
 				{ src: '/projects/sergio-castiglione/IG_Feed.png', ratio: 0.563 },
+				{ video: '/projects/sergio-castiglione/Reel_Japon_Banos.mp4', ratio: 0.5625 },
 				{ src: '/projects/sergio-castiglione/IG_Profile.png', ratio: 0.8 }
 			],
-			// fila: 1 horizontal
-			[{ src: '/projects/sergio-castiglione/Web_Contact.png', ratio: 1.225 }]
+			// fila: reel vertical + foto horizontal
+			[
+				{ video: '/projects/sergio-castiglione/Reel_Making_of_Segments.mp4', ratio: 0.5625 },
+				{ src: '/projects/sergio-castiglione/Web_Contact.png', ratio: 1.225 }
+			]
 		]
 	},
 	{
