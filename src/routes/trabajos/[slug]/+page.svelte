@@ -9,6 +9,22 @@
 			? `background-image: url(${val}); background-size: cover; background-position: center`
 			: `background: ${val}`;
 	}
+
+	// Reproduce el video sólo cuando está en pantalla (más confiable que el
+	// autoplay nativo cuando hay muchos reels, y mejor rendimiento).
+	function playInView(node: HTMLVideoElement) {
+		const io = new IntersectionObserver(
+			(entries) => {
+				for (const e of entries) {
+					if (e.isIntersecting) node.play().catch(() => {});
+					else node.pause();
+				}
+			},
+			{ threshold: 0.25 }
+		);
+		io.observe(node);
+		return { destroy: () => io.disconnect() };
+	}
 </script>
 
 <svelte:head>
@@ -106,6 +122,7 @@
 					{#if row[0].video}
 						<!-- svelte-ignore a11y_media_has_caption -->
 						<video
+							use:playInView
 							src={row[0].video}
 							autoplay
 							loop
@@ -132,6 +149,7 @@
 						{#if cell.video}
 							<!-- svelte-ignore a11y_media_has_caption -->
 							<video
+								use:playInView
 								src={cell.video}
 								autoplay
 								loop

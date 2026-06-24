@@ -19,6 +19,16 @@
 			n: '04',
 			title: 'Cobertura de eventos',
 			desc: 'Registramos tus eventos de principio a fin, capturando los momentos que importan.'
+		},
+		{
+			n: '05',
+			title: 'Servicios digitales',
+			desc: 'Placas para redes sociales, reels y community management para mantener tu marca activa.'
+		},
+		{
+			n: '06',
+			title: 'Diseño gráfico',
+			desc: 'Flyers, newsletters y piezas gráficas con la identidad de tu marca, para toda tu comunicación.'
 		}
 	];
 </script>
@@ -40,7 +50,7 @@
 		<div class="grid gap-px overflow-hidden rounded-3xl border border-ink/10 bg-ink/10 sm:grid-cols-2">
 			{#each services as s}
 				<a
-					href="/nosotros"
+					href="/estudio"
 					class="group bg-cream p-8 transition-colors hover:bg-ink sm:p-10"
 				>
 					<div class="flex items-start justify-between">

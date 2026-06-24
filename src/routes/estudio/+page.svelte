@@ -1,6 +1,11 @@
 <script lang="ts">
 	import Contact from '$lib/components/Contact.svelte';
 	import SocialIcon from '$lib/components/SocialIcon.svelte';
+	import LogoRain from '$lib/components/LogoRain.svelte';
+
+	// Acordeón de servicios
+	let openService = $state<number | null>(0);
+	const toggleService = (i: number) => (openService = openService === i ? null : i);
 
 	const values = [
 		{
@@ -22,6 +27,10 @@
 		{
 			title: 'Identidad',
 			desc: 'Cada proyecto tiene algo único. Nuestro trabajo es encontrarlo y darle una forma propia.'
+		},
+		{
+			title: 'Claridad',
+			desc: 'Hacemos lugar entre tanto ruido. Buscamos que cada marca encuentre una forma clara y propia de decir lo que tiene para decir.'
 		}
 	];
 
@@ -30,6 +39,33 @@
 		['Exploramos', 'Probamos ideas, direcciones y conceptos hasta dar con el correcto.'],
 		['Creamos', 'Diseñamos y pulimos cada pieza con foco en el detalle.'],
 		['Lanzamos', 'Entregamos todo listo para usar, con acompañamiento.']
+	];
+
+	const services = [
+		{
+			title: 'Branding & Identidad',
+			desc: 'Creamos logos, sistemas visuales y manuales de marca completos. Definimos colores, tipografías y un lenguaje gráfico propio para que tu marca se vea distinta, coherente y reconocible en todos los puntos de contacto, del feed a lo impreso. Trabajamos desde la estrategia hasta el último detalle, para que tu identidad no sea solo linda sino que también diga lo que tu marca quiere decir y se sostenga en el tiempo.'
+		},
+		{
+			title: 'Diseño Web',
+			desc: 'Diseñamos y desarrollamos sitios rápidos, lindos y fáciles de usar. Desde una landing hasta una tienda online, pensados para verse bien en cualquier dispositivo y para convertir visitas en clientes. Nos ocupamos de toda la experiencia: la estructura, el diseño, los textos y el desarrollo, dejándote un sitio listo para usar, fácil de actualizar y pensado para crecer con tu proyecto.'
+		},
+		{
+			title: 'AV & Producción',
+			desc: 'Producimos foto y video con mirada de autor: contenido para redes, piezas de marca y material audiovisual listo para compartir. Nos encargamos de la idea, la producción y la edición de principio a fin. Desde reels y campañas hasta videos institucionales, cuidamos cada plano para que el resultado tenga la calidad y la personalidad que tu marca merece.'
+		},
+		{
+			title: 'Cobertura de eventos',
+			desc: 'Registramos tus eventos de principio a fin. Foto, video, pantallas en vivo, aftermovie e historias en tiempo real para capturar y comunicar los momentos que importan. Estamos donde pasa la acción para que no se te escape nada, y te entregamos el material editado y listo para publicar, manteniendo viva la energía del evento también en tus redes.'
+		},
+		{
+			title: 'Servicios digitales',
+			desc: 'Mantenemos tu marca activa en redes: diseño de placas para redes sociales, producción de reels y community management. Planificamos, creamos y publicamos contenido con una voz coherente y constante. Pensamos una estrategia de contenido, armamos el calendario, respondemos a tu comunidad y medimos resultados para que tu presencia digital crezca de forma sostenida.'
+		},
+		{
+			title: 'Diseño gráfico',
+			desc: 'Diseñamos todas las piezas que tu comunicación necesita: flyers, newsletters, presentaciones y material gráfico, siempre con la identidad de tu marca y atención al detalle. Ya sea para imprimir o para pantalla, traducimos cada mensaje en piezas claras y atractivas que mantienen la coherencia visual de tu marca en cada formato.'
+		}
 	];
 
 	// Links de redes: placeholders por ahora, los reemplazamos por los reales.
@@ -57,13 +93,14 @@
 </script>
 
 <svelte:head>
-	<title>Nosotros · Moco</title>
+	<title>Estudio · Moco</title>
 	<meta name="description" content="Moco es un estudio creativo independiente. Conocé cómo trabajamos." />
 </svelte:head>
 
 <!-- Hero: texto a 2/3, espacio para foto a la derecha -->
-<header class="bg-ink px-5 pt-32 pb-28 text-cream sm:px-8 sm:pt-40 sm:pb-36">
-	<div class="mx-auto grid max-w-7xl gap-10 lg:grid-cols-3 lg:gap-16">
+<header class="relative overflow-hidden bg-ink px-5 pt-32 pb-28 text-cream sm:px-8 sm:pt-40 sm:pb-36">
+	<LogoRain />
+	<div class="relative z-10 mx-auto grid max-w-7xl gap-10 lg:grid-cols-3 lg:gap-16">
 		<div class="float-up flex flex-col lg:col-span-2">
 			<p class="mb-5 flex items-center gap-2 text-sm font-semibold tracking-wide text-cream/70 uppercase">
 				<span class="inline-block h-2 w-2 rounded-full bg-lime"></span>
@@ -101,6 +138,46 @@
 				<div class="rounded-3xl border border-ink/10 bg-cream-dark/30 p-7">
 					<h3 class="text-xl font-bold" style="font-family: var(--font-display)">{v.title}</h3>
 					<p class="mt-3 text-ink-soft">{v.desc}</p>
+				</div>
+			{/each}
+		</div>
+	</div>
+</section>
+
+<!-- Servicios (acordeón) -->
+<section class="px-5 pb-20 sm:px-8 sm:pb-28">
+	<div class="mx-auto max-w-7xl">
+		<p class="mb-3 text-sm font-semibold tracking-wide text-muted uppercase">Qué ofrecemos</p>
+		<h2 class="mb-10 text-3xl font-extrabold tracking-tight sm:text-5xl" style="font-family: var(--font-display)">
+			Nuestros servicios
+		</h2>
+		<div class="overflow-hidden rounded-3xl border border-ink/10">
+			{#each services as s, i}
+				<div class="border-b border-ink/10 last:border-b-0">
+					<button
+						type="button"
+						onclick={() => toggleService(i)}
+						aria-expanded={openService === i}
+						class="flex w-full items-center justify-between gap-4 px-6 py-6 text-left transition-colors hover:bg-cream-dark/40 sm:px-8"
+					>
+						<span class="text-xl font-bold sm:text-2xl" style="font-family: var(--font-display)">
+							{s.title}
+						</span>
+						<span
+							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ink/5 text-xl text-ink transition-transform duration-300 {openService ===
+							i
+								? 'rotate-45 bg-lime'
+								: ''}">+</span
+						>
+					</button>
+					<div
+						class="grid transition-[grid-template-rows] duration-300 ease-out"
+						style="grid-template-rows: {openService === i ? '1fr' : '0fr'}"
+					>
+						<div class="overflow-hidden">
+							<p class="px-6 pb-6 text-ink-soft sm:px-8">{s.desc}</p>
+						</div>
+					</div>
 				</div>
 			{/each}
 		</div>

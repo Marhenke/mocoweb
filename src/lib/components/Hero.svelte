@@ -22,17 +22,25 @@
 		</p>
 
 		<h1
-			class="float-up max-w-5xl text-[clamp(2rem,8.5vw,7.5rem)] leading-[0.95] font-extrabold tracking-tight"
+			class="float-up max-w-5xl text-6xl leading-[0.95] font-extrabold tracking-tight sm:text-[clamp(2rem,8.5vw,7.5rem)]"
 			style="font-family: var(--font-display)"
 		>
-			Hola, somos Moco.<br />
-			<span class="whitespace-nowrap">contenido <span class="bg-lime text-ink inline-block -rotate-2 rounded-2xl px-4 pb-2">pegajoso</span></span>
+			<span class="block sm:inline">Hola,</span>
+			<span class="block sm:inline">somos</span>
+			<span class="block sm:inline">Moco.</span>
+			<br class="hidden sm:block" />
+			<span class="sm:whitespace-nowrap"
+				><span class="block sm:inline">contenido</span>
+				<span class="bg-lime text-ink block w-fit -rotate-2 rounded-2xl px-4 pb-2 sm:inline-block"
+					>pegajoso</span
+				></span
+			>
 		</h1>
 
 		<div class="float-up mt-10 flex flex-wrap items-center gap-4">
 			<a
 				href="/contacto"
-				class="rounded-full bg-lime px-7 py-4 text-base font-semibold text-ink transition-all hover:bg-cream"
+				class="rounded-full bg-lime px-5 py-2 text-sm font-semibold text-ink transition-all hover:bg-cream sm:px-7 sm:py-4 sm:text-base"
 				>Empecemos un proyecto</a
 			>
 		</div>

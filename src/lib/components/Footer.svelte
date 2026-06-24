@@ -10,7 +10,7 @@
 
 		<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm font-medium text-ink-soft">
 			<a href="/" class="hover:text-ink">Inicio</a>
-			<a href="/nosotros" class="hover:text-ink">Nosotros</a>
+			<a href="/estudio" class="hover:text-ink">Estudio</a>
 			<a href="/trabajos" class="hover:text-ink">Trabajos</a>
 			<a href="/contacto" class="hover:text-ink">Contacto</a>
 		</div>

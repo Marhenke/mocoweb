@@ -5,7 +5,7 @@
 	let scrolled = $state(false);
 
 	const links = [
-		{ href: '/nosotros', label: 'Nosotros' },
+		{ href: '/estudio', label: 'Estudio' },
 		{ href: '/trabajos', label: 'Trabajos' },
 		{ href: '/contacto', label: 'Contacto' }
 	];
@@ -17,9 +17,9 @@
 	const isActive = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(href + '/');
 
-	// Páginas con hero oscuro arriba de todo (home con video, nosotros con
+	// Páginas con hero oscuro arriba de todo (home con video, estudio con
 	// fondo negro): mientras no se hizo scroll, el menú usa texto claro.
-	const darkHero = $derived(page.url.pathname === '/' || page.url.pathname === '/nosotros');
+	const darkHero = $derived(page.url.pathname === '/' || page.url.pathname === '/estudio');
 	const overHero = $derived(darkHero && !scrolled);
 
 	$effect(() => {

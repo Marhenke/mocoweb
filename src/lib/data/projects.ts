@@ -125,47 +125,93 @@ export const projects: Project[] = [
 		]
 	},
 	{
-		slug: 'ola-studio',
-		title: 'Ola Studio',
-		category: 'Dirección de arte',
-		year: '2024',
-		client: 'Ola Studio',
-		services: ['Dirección de arte', 'Contenido para redes', 'Campaña'],
-		bg: 'linear-gradient(135deg, #ff7a4d 0%, #ff5c35 100%)',
-		ink: '#16140f',
+		slug: 'ref',
+		title: 'REF',
+		category: 'Contenido · Cobertura',
+		year: '2025 - 2026',
+		client: 'REF',
+		services: [
+			'Contenido para redes',
+			'Comunicación institucional',
+			'Cobertura de eventos',
+			'Newsletters',
+			'Diseño gráfico'
+		],
+		bg: '/projects/ref/portada.jpeg',
+		cover: '/projects/ref/portada.jpeg',
+		ink: '#f4f0e6',
 		summary:
-			'Dirección de arte vibrante para una marca de indumentaria que quería frenar el scroll.',
+			'Comunicación digital activa que refleja la identidad de REF, sus eventos y la comunidad que forma parte del proyecto.',
 		challenge:
-			'Necesitaban una estética propia y reconocible para sus campañas, que se sostuviera en el tiempo y en distintos formatos.',
+			'Generar una comunicación digital activa que refleje la identidad de REF, sus eventos y la comunidad que forma parte del proyecto.',
 		solution:
-			'Definimos una paleta cálida, un sistema de composición y un tono de comunicación que hoy hace que sus piezas se reconozcan de lejos.',
-		gallery: placeholderGallery([
-			'linear-gradient(135deg, #ff7a4d 0%, #ff5c35 100%)',
-			'linear-gradient(135deg, #16140f 0%, #3a362d 100%)',
-			'linear-gradient(135deg, #ff5c35 0%, #ff7a4d 100%)',
-			'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)'
-		])
+			'Desarrollamos contenido para redes y comunicación institucional, incluyendo la cobertura del AMM 25 con producción de pantallas, aftermovie e historias en tiempo real. Realizamos coberturas fotográficas y audiovisuales de eventos de comunidad como el asado con los campeones del 86, visita al atelier de Min Agostini, Foro Shuffles, entre otros. También producimos newsletters mensuales, flyers y piezas gráficas para acompañar la comunicación de REF y mantener una presencia digital constante.',
+		gallery: [
+			// fila: 2 horizontales (fotos)
+			[
+				{ src: '/projects/ref/ref-25.jpg', ratio: 1.5 },
+				{ src: '/projects/ref/ref-32.jpg', ratio: 1.5 }
+			],
+			// fila: video horizontal (protagonista) + placa vertical
+			[
+				{ video: '/projects/ref/video-horizontal.mp4', ratio: 1.777 },
+				{ src: '/projects/ref/placa-4.png', ratio: 0.8 }
+			],
+			// fila: 3 verticales (reel + placa + reel) — reels separados por la imagen
+			[
+				{ video: '/projects/ref/reel-1.mp4', ratio: 0.5625 },
+				{ src: '/projects/ref/placa-1.png', ratio: 0.75 },
+				{ video: '/projects/ref/reel-2.mp4', ratio: 0.5625 }
+			],
+			// fila: 2 horizontales (placa + foto)
+			[
+				{ src: '/projects/ref/placa-2.png', ratio: 1.333 },
+				{ src: '/projects/ref/ref-278.jpg', ratio: 1.5 }
+			],
+			// fila: 3 verticales (reel + placa + reel) — reels separados por la imagen
+			[
+				{ video: '/projects/ref/reel-3.mp4', ratio: 0.5625 },
+				{ src: '/projects/ref/placa-3.png', ratio: 0.8 },
+				{ video: '/projects/ref/reel-4.mp4', ratio: 0.5625 }
+			],
+			// fila: 2 horizontales (fotos)
+			[
+				{ src: '/projects/ref/ref-282.jpg', ratio: 1.5 },
+				{ src: '/projects/ref/ref-359.jpg', ratio: 1.5 }
+			],
+			// fila: 2 horizontales (fotos)
+			[
+				{ src: '/projects/ref/ref-93.jpg', ratio: 1.5 },
+				{ src: '/projects/ref/ref-130.jpg', ratio: 1.5 }
+			]
+		]
 	},
 	{
-		slug: 'nido',
-		title: 'Nido',
-		category: 'Branding · Print',
-		year: '2024',
-		client: 'Nido Deco',
-		services: ['Identidad visual', 'Papelería', 'Catálogo'],
-		bg: 'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)',
-		ink: '#16140f',
-		summary: 'Una marca de objetos para el hogar con calidez artesanal y prolijidad editorial.',
+		slug: 'barbara-plesky',
+		title: 'Barbara Plesky',
+		category: 'Contenido · Producción audiovisual · Redes',
+		year: '2025',
+		client: 'Barbara Plesky',
+		services: ['Producción audiovisual', 'Contenido para redes', 'Cobertura de evento'],
+		bg: '/projects/barbara-plesky/placa.png',
+		cover: '/projects/barbara-plesky/placa.png',
+		ink: '#f4f0e6',
+		summary:
+			'Cobertura oficial de la participación de la artista Barbara Plesky en Proyecto Arte 2025, feria de arte realizada en LATU Montevideo, acompañando la presentación de su obra "Atravesadas" a través de contenido audiovisual para redes sociales.',
 		challenge:
-			'Nido quería transmitir lo hecho a mano y lo cuidado, evitando caer en lo rústico o lo improvisado.',
+			'Comunicar la participación de Barbara y su obra "Atravesadas" en una feria de arte, generando contenido que transmitiera la experiencia para sus redes sociales.',
 		solution:
-			'Creamos una identidad de aire editorial, con tipografías suaves, mucho aire y un catálogo impreso que invita a tocar.',
-		gallery: placeholderGallery([
-			'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)',
-			'linear-gradient(135deg, #16140f 0%, #3a362d 100%)',
-			'linear-gradient(135deg, #cfc6ac 0%, #e8e2d2 100%)',
-			'linear-gradient(135deg, #c8f135 0%, #aad419 100%)'
-		])
+			'Hicimos la cobertura audiovisual completa del evento en el LATU de Montevideo, produciendo fotos y reels pensados para redes que acompañaron la presentación de la obra.',
+		gallery: [
+			// fila: 3 verticales (foto + reel + foto) — reel separado por las fotos
+			[
+				{ src: '/projects/barbara-plesky/foto-1.jpg', ratio: 0.75 },
+				{ video: '/projects/barbara-plesky/reel.mp4', ratio: 0.5625 },
+				{ src: '/projects/barbara-plesky/foto-2.jpg', ratio: 0.75 }
+			],
+			// fila: 1 vertical (foto, alineada a la izquierda)
+			[{ src: '/projects/barbara-plesky/foto-3.jpg', ratio: 0.75 }]
+		]
 	},
 	{
 		slug: 'pulpo',
