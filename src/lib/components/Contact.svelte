@@ -20,7 +20,7 @@
 					>mocoestudiocreativo@gmail.com</a
 				>
 				<a
-					href="https://instagram.com"
+					href="https://www.instagram.com/mocoestudio_/"
 					target="_blank"
 					rel="noopener noreferrer"
 					class="rounded-full border border-ink/30 px-7 py-4 text-base font-semibold transition-colors hover:bg-ink hover:text-cream"
