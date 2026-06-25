@@ -127,12 +127,14 @@ export const projects: Project[] = [
 	{
 		slug: 'ref',
 		title: 'REF',
-		category: 'Contenido · Cobertura',
+		category: 'Contenido · Estrategia digital · Branding · Producción audiovisual',
 		year: '2025 - 2026',
 		client: 'REF',
 		services: [
 			'Contenido para redes',
-			'Comunicación institucional',
+			'Estrategia digital',
+			'Branding',
+			'Producción audiovisual',
 			'Cobertura de eventos',
 			'Newsletters',
 			'Diseño gráfico'
@@ -141,7 +143,7 @@ export const projects: Project[] = [
 		cover: '/projects/ref/portada.jpeg',
 		ink: '#f4f0e6',
 		summary:
-			'Comunicación digital activa que refleja la identidad de REF, sus eventos y la comunidad que forma parte del proyecto.',
+			'Construcción de presencia digital para REF a través de contenido audiovisual, piezas gráficas y comunicación constante, acompañando eventos, comunidad y experiencias de marca.',
 		challenge:
 			'Generar una comunicación digital activa que refleje la identidad de REF, sus eventos y la comunidad que forma parte del proyecto.',
 		solution:
@@ -216,6 +218,43 @@ export const projects: Project[] = [
 			]
 		]
 	},
+	{
+		slug: 'outbox',
+		title: 'Outbox',
+		category: 'Contenido · Producción audiovisual · Branding · Comunicación digital',
+		year: '2025 - 2026',
+		client: 'Outbox',
+		services: ['Producción audiovisual', 'Contenido para redes', 'Branding', 'Comunicación digital'],
+		bg: '/projects/outbox/portada.jpg',
+		cover: '/projects/outbox/portada.jpg',
+		ink: '#f4f0e6',
+		summary:
+			'Desarrollo de contenido para experiencias únicas y viajes memorables, acompañando cada destino a través de una narrativa audiovisual que refleja la esencia de cada aventura.',
+		challenge:
+			'Comunicar el valor diferencial de las experiencias, transmitiendo no solo los destinos sino también los momentos, vínculos y emociones que forman parte de cada viaje.',
+		solution:
+			'Realizamos cobertura audiovisual de experiencias en Bali, Noruega y Las Heras (Santa Cruz), generando contenido para redes sociales, seguimiento diario mediante historias en tiempo real y piezas que muestran el detrás de escena de cada recorrido. Además desarrollamos brochures institucionales para comunicar las propuestas de viaje y fortalecer la identidad de marca.',
+		gallery: [
+			// fila: 2 horizontales
+			[
+				{ src: '/projects/outbox/img-1.jpg', ratio: 1.777 },
+				{ src: '/projects/outbox/img-2.jpg', ratio: 1.777 }
+			],
+			// fila: video horizontal protagonista + vertical
+			[
+				{ video: '/projects/outbox/video-horizontal.mp4', ratio: 1.777 },
+				{ src: '/projects/outbox/img-3.jpg', ratio: 0.8 }
+			],
+			// fila: 3 verticales (reel + foto + reel)
+			[
+				{ video: '/projects/outbox/reel-3.mp4', ratio: 0.5625 },
+				{ src: '/projects/outbox/img-4.jpg', ratio: 0.8 },
+				{ video: '/projects/outbox/reel-1.mp4', ratio: 0.5625 }
+			],
+			// fila: reel solo, alineado a la izquierda
+			[{ video: '/projects/outbox/reel-2.mp4', ratio: 0.5625 }]
+		]
+	}
 ];
 
 export function getProject(slug: string): Project | undefined {
