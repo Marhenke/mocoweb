@@ -193,8 +193,8 @@ export const projects: Project[] = [
 		year: '2025',
 		client: 'Barbara Plesky',
 		services: ['Producción audiovisual', 'Contenido para redes', 'Cobertura de evento'],
-		bg: '/projects/barbara-plesky/placa.png',
-		cover: '/projects/barbara-plesky/placa.png',
+		bg: '/projects/barbara-plesky/portada.jpg',
+		cover: '/projects/barbara-plesky/portada.jpg',
 		ink: '#f4f0e6',
 		summary:
 			'Cobertura oficial de la participación de la artista Barbara Plesky en Proyecto Arte 2025, feria de arte realizada en LATU Montevideo, acompañando la presentación de su obra "Atravesadas" a través de contenido audiovisual para redes sociales.',
@@ -213,49 +213,6 @@ export const projects: Project[] = [
 			[{ src: '/projects/barbara-plesky/foto-3.jpg', ratio: 0.75 }]
 		]
 	},
-	{
-		slug: 'pulpo',
-		title: 'Pulpo',
-		category: 'Branding · Web',
-		year: '2024',
-		client: 'Pulpo Agencia',
-		services: ['Naming', 'Identidad visual', 'Diseño web'],
-		bg: 'linear-gradient(135deg, #7c5cff 0%, #5b3df0 100%)',
-		ink: '#f4f0e6',
-		summary: 'Identidad y web para una agencia digital que quería verse tan ágil como trabaja.',
-		challenge:
-			'Pulpo necesitaba una marca flexible, capaz de adaptarse a muchos brazos del negocio sin perder unidad.',
-		solution:
-			'Diseñamos un sistema modular y una web dinámica que crece con ellos, manteniendo siempre la misma personalidad.',
-		gallery: placeholderGallery([
-			'linear-gradient(135deg, #7c5cff 0%, #5b3df0 100%)',
-			'linear-gradient(135deg, #16140f 0%, #3a362d 100%)',
-			'linear-gradient(135deg, #5b3df0 0%, #7c5cff 100%)',
-			'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)'
-		])
-	},
-	{
-		slug: 'sereno',
-		title: 'Sereno',
-		category: 'Branding · Packaging',
-		year: '2023',
-		client: 'Sereno Wellness',
-		services: ['Identidad visual', 'Packaging', 'Dirección de arte'],
-		bg: 'linear-gradient(135deg, #5fb6a8 0%, #3f8f83 100%)',
-		ink: '#f4f0e6',
-		summary:
-			'Una marca de bienestar serena y luminosa, pensada para transmitir calma desde el primer vistazo.',
-		challenge:
-			'Sereno quería diferenciarse del cliché del wellness sin perder la sensación de calma y cuidado.',
-		solution:
-			'Trabajamos una paleta suave, formas orgánicas y un packaging táctil que acompaña la experiencia del producto.',
-		gallery: placeholderGallery([
-			'linear-gradient(135deg, #5fb6a8 0%, #3f8f83 100%)',
-			'linear-gradient(135deg, #e8e2d2 0%, #cfc6ac 100%)',
-			'linear-gradient(135deg, #3f8f83 0%, #5fb6a8 100%)',
-			'linear-gradient(135deg, #16140f 0%, #3a362d 100%)'
-		])
-	}
 ];
 
 export function getProject(slug: string): Project | undefined {

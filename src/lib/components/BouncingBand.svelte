@@ -8,7 +8,7 @@
 	];
 
 	const SIZE = 150;
-	const SPEED = 4.5; // más rápido
+	const SPEED = 9;
 
 	let band = $state<HTMLElement>();
 
@@ -22,11 +22,14 @@
 		filter: string;
 	};
 
-	function makeBlob(filterIndex: number): Blob {
+	function makeBlob(filterIndex: number, startX?: number, startY?: number): Blob {
 		const a = Math.random() * Math.PI * 2;
+		const el = band;
+		const x = startX !== undefined ? startX : Math.random() * ((el?.clientWidth ?? 400) - SIZE);
+		const y = startY !== undefined ? startY : Math.random() * ((el?.clientHeight ?? 300) - SIZE);
 		return {
-			x: Math.random() * 200 + 40,
-			y: Math.random() * 100 + 40,
+			x,
+			y,
 			rot: 0,
 			vx: Math.cos(a) * SPEED,
 			vy: Math.sin(a) * SPEED,
@@ -37,8 +40,16 @@
 
 	let blobs = $state<Blob[]>([makeBlob(0)]);
 
-	function addBlob() {
-		blobs = [...blobs, makeBlob(blobs.length)];
+	function addBlob(e?: MouseEvent) {
+		const el = band;
+		if (e && el) {
+			const rect = el.getBoundingClientRect();
+			const x = Math.max(0, Math.min(e.clientX - rect.left - SIZE / 2, rect.width - SIZE));
+			const y = Math.max(0, Math.min(e.clientY - rect.top - SIZE / 2, rect.height - SIZE));
+			blobs = [...blobs, makeBlob(blobs.length, x, y)];
+		} else {
+			blobs = [...blobs, makeBlob(blobs.length)];
+		}
 	}
 
 	function stepBlob(b: Blob) {
@@ -83,14 +94,15 @@
 	});
 </script>
 
-<section
+<section class="px-5 pb-24 sm:px-8 sm:pb-32">
+<div
 	bind:this={band}
 	onclick={addBlob}
 	onkeydown={(e) => e.key === 'Enter' && addBlob()}
 	role="button"
 	tabindex="0"
 	aria-label="Agregar blob"
-	class="relative h-[55vh] min-h-[360px] w-full cursor-pointer overflow-hidden bg-ink select-none"
+	class="relative mx-auto h-[55vh] min-h-[360px] max-w-7xl cursor-pointer overflow-hidden rounded-3xl bg-ink select-none"
 >
 	<span
 		class="pointer-events-none absolute bottom-5 left-1/2 -translate-x-1/2 text-xs font-semibold tracking-widest text-cream/30 uppercase"
@@ -109,4 +121,5 @@
 			class="pointer-events-auto absolute top-0 left-0 object-contain will-change-transform"
 		/>
 	{/each}
+</div>
 </section>
