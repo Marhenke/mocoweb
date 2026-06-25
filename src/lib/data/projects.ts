@@ -219,14 +219,14 @@ export const projects: Project[] = [
 		]
 	},
 	{
-		slug: 'outbox',
-		title: 'Outbox',
+		slug: 'outobox',
+		title: 'Outobox',
 		category: 'Contenido · Producción audiovisual · Branding · Comunicación digital',
 		year: '2025 - 2026',
 		client: 'Outbox',
 		services: ['Producción audiovisual', 'Contenido para redes', 'Branding', 'Comunicación digital'],
-		bg: '/projects/outbox/portada.jpg',
-		cover: '/projects/outbox/portada.jpg',
+		bg: '/projects/outobox/portada.jpg',
+		cover: '/projects/outobox/portada.jpg',
 		ink: '#f4f0e6',
 		summary:
 			'Desarrollo de contenido para experiencias únicas y viajes memorables, acompañando cada destino a través de una narrativa audiovisual que refleja la esencia de cada aventura.',
@@ -237,22 +237,22 @@ export const projects: Project[] = [
 		gallery: [
 			// fila: 2 horizontales
 			[
-				{ src: '/projects/outbox/img-1.jpg', ratio: 1.777 },
-				{ src: '/projects/outbox/img-2.jpg', ratio: 1.777 }
+				{ src: '/projects/outobox/img-1.jpg', ratio: 1.777 },
+				{ src: '/projects/outobox/img-2.jpg', ratio: 1.777 }
 			],
 			// fila: video horizontal protagonista + vertical
 			[
-				{ video: '/projects/outbox/video-horizontal.mp4', ratio: 1.777 },
-				{ src: '/projects/outbox/img-3.jpg', ratio: 0.8 }
+				{ video: '/projects/outobox/video-horizontal.mp4', ratio: 1.777 },
+				{ src: '/projects/outobox/img-3.jpg', ratio: 0.8 }
 			],
 			// fila: 3 verticales (reel + foto + reel)
 			[
-				{ video: '/projects/outbox/reel-3.mp4', ratio: 0.5625 },
-				{ src: '/projects/outbox/img-4.jpg', ratio: 0.8 },
-				{ video: '/projects/outbox/reel-1.mp4', ratio: 0.5625 }
+				{ video: '/projects/outobox/reel-3.mp4', ratio: 0.5625 },
+				{ src: '/projects/outobox/img-4.jpg', ratio: 0.8 },
+				{ video: '/projects/outobox/reel-1.mp4', ratio: 0.5625 }
 			],
 			// fila: reel solo, alineado a la izquierda
-			[{ video: '/projects/outbox/reel-2.mp4', ratio: 0.5625 }]
+			[{ video: '/projects/outobox/reel-2.mp4', ratio: 0.5625 }]
 		]
 	}
 ];
