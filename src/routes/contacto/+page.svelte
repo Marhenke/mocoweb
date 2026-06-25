@@ -18,20 +18,6 @@
 		{ label: 'Ubicación', value: 'Buenos Aires, Argentina', href: null }
 	];
 
-	const faqs = [
-		[
-			'¿Trabajan con marcas de cualquier rubro?',
-			'Sí. Nos gustan especialmente los proyectos que se animan a algo distinto, sin importar el rubro.'
-		],
-		[
-			'¿Cuánto tarda un proyecto?',
-			'Depende del alcance, pero una identidad completa suele llevar entre 4 y 8 semanas.'
-		],
-		[
-			'¿Atienden clientes de otras ciudades o países?',
-			'Sí, trabajamos a distancia sin problema. Gran parte de nuestros proyectos son remotos.'
-		]
-	];
 </script>
 
 <svelte:head>
@@ -126,19 +112,3 @@
 	</div>
 </section>
 
-<!-- Preguntas frecuentes -->
-<section class="px-5 pb-24 sm:px-8 sm:pb-32">
-	<div class="mx-auto max-w-3xl">
-		<h2 class="mb-8 text-3xl font-extrabold tracking-tight sm:text-5xl" style="font-family: var(--font-display)">
-			Preguntas frecuentes
-		</h2>
-		<div class="divide-y divide-ink/10 border-y border-ink/10">
-			{#each faqs as [q, a]}
-				<div class="py-6">
-					<h3 class="text-lg font-bold">{q}</h3>
-					<p class="mt-2 text-ink-soft">{a}</p>
-				</div>
-			{/each}
-		</div>
-	</div>
-</section>
