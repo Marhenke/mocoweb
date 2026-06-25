@@ -43,8 +43,8 @@ export const projects: Project[] = [
 		year: '2025',
 		client: 'Sergio Castiglione',
 		services: ['Diseño web', 'Community Management', 'Producción de reels'],
-		bg: '/projects/sergio-castiglione/Portada.png',
-		cover: '/projects/sergio-castiglione/Portada.png',
+		bg: '/projects/sergio-castiglione/Portada.jpg',
+		cover: '/projects/sergio-castiglione/Portada.jpg',
 		ink: '#f4f0e6',
 		summary:
 			'Presencia digital integral para Sergio Castiglione: web, redes y contenido audiovisual.',
@@ -55,31 +55,31 @@ export const projects: Project[] = [
 		gallery: [
 			// fila: 2 horizontales
 			[
-				{ src: '/projects/sergio-castiglione/Web_About_Tablet.png', ratio: 1.25 },
-				{ src: '/projects/sergio-castiglione/Web_Archive.png', ratio: 1.25 }
+				{ src: '/projects/sergio-castiglione/Web_About_Tablet.jpg', ratio: 1.25 },
+				{ src: '/projects/sergio-castiglione/Web_Archive.jpg', ratio: 1.25 }
 			],
 			// fila: 3 verticales (foto + reel + foto)
 			[
-				{ src: '/projects/sergio-castiglione/Web_Home_Mobile.png', ratio: 0.666 },
+				{ src: '/projects/sergio-castiglione/Web_Home_Mobile.jpg', ratio: 0.666 },
 				{ video: '/projects/sergio-castiglione/Reel_Japon_1.mp4', ratio: 0.5625 },
 				{ src: '/projects/sergio-castiglione/Web_Home.png', ratio: 0.75 }
 			],
 			// fila: 3 verticales (foto + reel + foto)
 			[
-				{ src: '/projects/sergio-castiglione/Web_Australis.png', ratio: 0.8 },
+				{ src: '/projects/sergio-castiglione/Web_Australis.jpg', ratio: 0.8 },
 				{ video: '/projects/sergio-castiglione/Reel_Japon_2.mp4', ratio: 0.5625 },
-				{ src: '/projects/sergio-castiglione/Web_Contact_Mobile.png', ratio: 0.8 }
+				{ src: '/projects/sergio-castiglione/Web_Contact_Mobile.jpg', ratio: 0.8 }
 			],
 			// fila: 3 verticales (foto + reel + foto)
 			[
-				{ src: '/projects/sergio-castiglione/IG_Feed.png', ratio: 0.563 },
+				{ src: '/projects/sergio-castiglione/IG_Feed.jpg', ratio: 0.563 },
 				{ video: '/projects/sergio-castiglione/Reel_Japon_Banos.mp4', ratio: 0.5625 },
-				{ src: '/projects/sergio-castiglione/IG_Profile.png', ratio: 0.8 }
+				{ src: '/projects/sergio-castiglione/IG_Profile.jpg', ratio: 0.8 }
 			],
 			// fila: reel vertical + foto horizontal
 			[
 				{ video: '/projects/sergio-castiglione/Reel_Making_of_Segments.mp4', ratio: 0.5625 },
-				{ src: '/projects/sergio-castiglione/Web_Contact.png', ratio: 1.225 }
+				{ src: '/projects/sergio-castiglione/Web_Contact.jpg', ratio: 1.225 }
 			]
 		]
 	},
@@ -90,8 +90,8 @@ export const projects: Project[] = [
 		year: '2025',
 		client: 'Racebox',
 		services: ['Placas para redes', 'Producción de reels', 'Ads'],
-		bg: '/projects/racebox/portada.png',
-		cover: '/projects/racebox/portada.png',
+		bg: '/projects/racebox/portada.jpg',
+		cover: '/projects/racebox/portada.jpg',
 		ink: '#f4f0e6',
 		summary:
 			'Contenido para redes y campañas de ads para un courier e importador que necesitaba destacarse online.',
@@ -102,24 +102,24 @@ export const projects: Project[] = [
 		gallery: [
 			// fila: 2 horizontales
 			[
-				{ src: '/projects/racebox/Racebox_IPad.png', ratio: 1.5 },
-				{ src: '/projects/racebox/Racebox_MacBook.png', ratio: 1.5 }
+				{ src: '/projects/racebox/Racebox_IPad.jpg', ratio: 1.5 },
+				{ src: '/projects/racebox/Racebox_MacBook.jpg', ratio: 1.5 }
 			],
 			// fila: 3 verticales (foto + reel + foto)
 			[
-				{ src: '/projects/racebox/Racebox_IPhone_Box_Cenital.png', ratio: 0.75 },
+				{ src: '/projects/racebox/Racebox_IPhone_Box_Cenital.jpg', ratio: 0.75 },
 				{ video: '/projects/racebox/Racebox_Reel_Hub.mp4', ratio: 0.5625 },
-				{ src: '/projects/racebox/Racebox_IPhone_Boxes.png', ratio: 0.563 }
+				{ src: '/projects/racebox/Racebox_IPhone_Boxes.jpg', ratio: 0.563 }
 			],
 			// fila: 2 horizontales
 			[
-				{ src: '/projects/racebox/Racebox_IPhone_In_Box.png', ratio: 1.5 },
-				{ src: '/projects/racebox/Racebox_IPhone_Leaning_Box.png', ratio: 1.777 }
+				{ src: '/projects/racebox/Racebox_IPhone_In_Box.jpg', ratio: 1.5 },
+				{ src: '/projects/racebox/Racebox_IPhone_Leaning_Box.jpg', ratio: 1.777 }
 			],
 			// fila: 3 verticales (reel + foto + reel)
 			[
 				{ video: '/projects/racebox/Racebox_Reel_LCL_Courier.mp4', ratio: 0.5625 },
-				{ src: '/projects/racebox/Racebox_IPhone_Hand.png', ratio: 0.592 },
+				{ src: '/projects/racebox/Racebox_IPhone_Hand.jpg', ratio: 0.592 },
 				{ video: '/projects/racebox/Racebox_Reel_Socio_Logistico.mp4', ratio: 0.5625 }
 			]
 		]
@@ -155,23 +155,23 @@ export const projects: Project[] = [
 			// fila: video horizontal (protagonista) + placa vertical
 			[
 				{ video: '/projects/ref/video-horizontal.mp4', ratio: 1.777 },
-				{ src: '/projects/ref/placa-4.png', ratio: 0.8 }
+				{ src: '/projects/ref/placa-4.jpg', ratio: 0.8 }
 			],
 			// fila: 3 verticales (reel + placa + reel) — reels separados por la imagen
 			[
 				{ video: '/projects/ref/reel-1.mp4', ratio: 0.5625 },
-				{ src: '/projects/ref/placa-1.png', ratio: 0.75 },
+				{ src: '/projects/ref/placa-1.jpg', ratio: 0.75 },
 				{ video: '/projects/ref/reel-2.mp4', ratio: 0.5625 }
 			],
 			// fila: 2 horizontales (placa + foto)
 			[
-				{ src: '/projects/ref/placa-2.png', ratio: 1.333 },
+				{ src: '/projects/ref/placa-2.jpg', ratio: 1.333 },
 				{ src: '/projects/ref/ref-278.jpg', ratio: 1.5 }
 			],
 			// fila: 3 verticales (reel + placa + reel) — reels separados por la imagen
 			[
 				{ video: '/projects/ref/reel-3.mp4', ratio: 0.5625 },
-				{ src: '/projects/ref/placa-3.png', ratio: 0.8 },
+				{ src: '/projects/ref/placa-3.jpg', ratio: 0.8 },
 				{ video: '/projects/ref/reel-4.mp4', ratio: 0.5625 }
 			],
 			// fila: 2 horizontales (fotos)
@@ -212,7 +212,7 @@ export const projects: Project[] = [
 			// fila: vertical + horizontal
 			[
 				{ src: '/projects/barbara-plesky/foto-3.jpg', ratio: 0.75 },
-				{ src: '/projects/barbara-plesky/placa-chatgpt.png', ratio: 1.333 }
+				{ src: '/projects/barbara-plesky/placa-chatgpt.jpg', ratio: 1.333 }
 			]
 		]
 	},
