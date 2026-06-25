@@ -209,8 +209,11 @@ export const projects: Project[] = [
 				{ video: '/projects/barbara-plesky/reel.mp4', ratio: 0.5625 },
 				{ src: '/projects/barbara-plesky/foto-2.jpg', ratio: 0.75 }
 			],
-			// fila: 1 vertical (foto, alineada a la izquierda)
-			[{ src: '/projects/barbara-plesky/foto-3.jpg', ratio: 0.75 }]
+			// fila: vertical + horizontal
+			[
+				{ src: '/projects/barbara-plesky/foto-3.jpg', ratio: 0.75 },
+				{ src: '/projects/barbara-plesky/placa-chatgpt.png', ratio: 1.333 }
+			]
 		]
 	},
 ];
