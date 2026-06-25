@@ -75,9 +75,9 @@
 			photo: '/team/mar.jpg',
 			role: 'Lic. en Diseño',
 			socials: [
-				{ name: 'instagram', href: 'https://instagram.com' },
-				{ name: 'tiktok', href: 'https://tiktok.com' },
-				{ name: 'youtube', href: 'https://youtube.com' }
+				{ name: 'instagram', href: 'https://www.instagram.com/marlene.formulafan/' },
+				{ name: 'tiktok', href: 'https://www.tiktok.com/@marlene.formulafan' },
+				{ name: 'youtube', href: 'https://www.youtube.com/@FormulaFan-f4r' }
 			]
 		},
 		{
@@ -85,10 +85,10 @@
 			photo: '/team/gegen.jpg',
 			role: 'Lic. en Comunicación',
 			socials: [
-				{ name: 'instagram', href: 'https://instagram.com' },
-				{ name: 'tiktok', href: 'https://tiktok.com' },
-				{ name: 'youtube', href: 'https://youtube.com' },
-				{ name: 'spotify', href: 'https://spotify.com' }
+				{ name: 'instagram', href: 'https://www.instagram.com/gegen_._/' },
+				{ name: 'tiktok', href: 'https://www.tiktok.com/@gegenn___' },
+				{ name: 'youtube', href: 'https://www.youtube.com/channel/UC2VZHTMSspMjD8niEzacPvg' },
+				{ name: 'spotify', href: 'https://open.spotify.com/artist/2bFB8J4t9LQDbls4tjE5IJ' }
 			]
 		}
 	] as const;
