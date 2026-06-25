@@ -71,7 +71,8 @@
 	// Links de redes: placeholders por ahora, los reemplazamos por los reales.
 	const team = [
 		{
-			name: 'Marlene Henke',
+			name: 'Mar',
+			photo: '/team/mar.jpg',
 			role: 'Lic. en Diseño',
 			socials: [
 				{ name: 'instagram', href: 'https://instagram.com' },
@@ -80,7 +81,8 @@
 			]
 		},
 		{
-			name: 'Joaquín Gegenschatz',
+			name: 'Gegen',
+			photo: '/team/gegen.jpg',
 			role: 'Lic. en Comunicación',
 			socials: [
 				{ name: 'instagram', href: 'https://instagram.com' },
@@ -213,12 +215,11 @@
 		<div class="grid grid-cols-2 gap-5 lg:grid-cols-4">
 			{#each team as member}
 				<div>
-					<!-- Foto del integrante (placeholder hasta tener las reales) -->
-					<div
-						class="flex aspect-[4/5] w-full items-center justify-center rounded-3xl border border-ink/10 bg-cream-dark/40"
-					>
-						<span class="text-sm font-semibold text-muted">Foto</span>
-					</div>
+					<img
+						src={member.photo}
+						alt={member.name}
+						class="aspect-[4/5] w-full rounded-3xl object-cover"
+					/>
 					<h3 class="mt-4 text-xl font-bold" style="font-family: var(--font-display)">{member.name}</h3>
 					<p class="mt-1 text-ink-soft">{member.role}</p>
 					<div class="mt-3 flex items-center gap-2">
