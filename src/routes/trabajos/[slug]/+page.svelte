@@ -156,14 +156,14 @@
 								muted
 								playsinline
 								class="block h-auto rounded-2xl"
-								style="flex: {cell.ratio} 1 0; min-width: 0;"
+								style="flex: {cell.ratio} 1 0; min-width: 0; aspect-ratio: {cell.ratio};"
 							></video>
 						{:else if cell.src}
 							<img
 								src={cell.src}
 								alt=""
 								class="block h-auto rounded-2xl"
-								style="flex: {cell.ratio} 1 0; min-width: 0;"
+								style="flex: {cell.ratio} 1 0; min-width: 0; aspect-ratio: {cell.ratio};"
 							/>
 						{:else}
 							<div
