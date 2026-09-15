@@ -254,6 +254,48 @@ export const projects: Project[] = [
 			// fila: reel solo, alineado a la izquierda
 			[{ video: '/projects/outobox/reel-2.mp4', ratio: 0.5625 }]
 		]
+	},
+	{
+		slug: 'ref-summit',
+		title: 'REF × Summit de Empresas Familiares',
+		category: 'Diseño web · Comunicación digital',
+		year: '2026',
+		client: 'REF',
+		services: ['Diseño web', 'Comunicación digital', 'Diseño gráfico'],
+		bg: '/projects/ref-summit/portada.jpg',
+		cover: '/projects/ref-summit/portada.jpg',
+		ink: '#f4f0e6',
+		summary:
+			'Landing page para la 2ª edición del Summit de Empresas Familiares, un evento para dueños de empresas de familia organizado por REF. Una pieza digital con identidad propia que combina la solidez de REF con la estética propia del Summit.',
+		challenge:
+			'Crear una landing page que funcionara como el punto de entrada al evento y convirtiera visitas en inscriptos. El sitio debía equilibrar la seriedad y el respaldo de REF con una comunicación cálida y accesible para empresas familiares de todo tamaño.',
+		solution:
+			'Diseñamos y desarrollamos una landing de una sola página que combina tipografía serif de autor (Newsreader) con los colores del Summit —violeta y lima— sobre fondos neutros, creando una identidad visual propia pero reconocible dentro del universo REF. Incluye hero con foto del evento, factcard con los datos clave, sección de oradores, agenda detallada, planes de entradas con código 2x1 para miembros REF y animaciones de reveal al scroll.',
+		gallery: [
+			// fila: 2 horizontales (hero MacBook + "Nadie entiende" MacBook)
+			[
+				{ src: '/projects/ref-summit/img-1.jpg', ratio: 1.334 },
+				{ src: '/projects/ref-summit/img-2.jpg', ratio: 1.334 }
+			],
+			// fila: 3 verticales (3 iPhones)
+			[
+				{ src: '/projects/ref-summit/img-8.jpg', ratio: 0.5625 },
+				{ src: '/projects/ref-summit/img-9.jpg', ratio: 0.5625 },
+				{ src: '/projects/ref-summit/img-10.jpg', ratio: 0.5625 }
+			],
+			// fila: 2 horizontales ("¿Qué vas?" + speakers)
+			[
+				{ src: '/projects/ref-summit/img-3.jpg', ratio: 1.334 },
+				{ src: '/projects/ref-summit/img-4.jpg', ratio: 1.334 }
+			],
+			// fila: 2 horizontales (agenda + iMac sponsors)
+			[
+				{ src: '/projects/ref-summit/img-5.jpg', ratio: 1.334 },
+				{ src: '/projects/ref-summit/img-6.jpg', ratio: 1.334 }
+			],
+			// fila: solo, alineado a la izquierda (iMac cierre dark)
+			[{ src: '/projects/ref-summit/img-7.jpg', ratio: 1.334 }]
+		]
 	}
 ];
 
