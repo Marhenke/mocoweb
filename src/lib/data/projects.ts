@@ -262,8 +262,8 @@ export const projects: Project[] = [
 		year: '2026',
 		client: 'REF',
 		services: ['Diseño web', 'Comunicación digital', 'Diseño gráfico'],
-		bg: '/projects/ref-summit/portada.jpg',
-		cover: '/projects/ref-summit/portada.jpg',
+		bg: '/projects/ref-summit/img-1.jpg',
+		cover: '/projects/ref-summit/img-1.jpg',
 		ink: '#f4f0e6',
 		summary:
 			'Landing page para la 2ª edición del Summit de Empresas Familiares, un evento para dueños de empresas de familia organizado por REF. Una pieza digital con identidad propia que combina la solidez de REF con la estética propia del Summit.',
