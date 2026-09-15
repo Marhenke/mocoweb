@@ -288,13 +288,11 @@ export const projects: Project[] = [
 				{ src: '/projects/ref-summit/img-3.jpg', ratio: 1.334 },
 				{ src: '/projects/ref-summit/img-4.jpg', ratio: 1.334 }
 			],
-			// fila: 2 horizontales (agenda + iMac sponsors)
+			// fila: 2 horizontales (agenda + iMac cierre dark)
 			[
 				{ src: '/projects/ref-summit/img-5.jpg', ratio: 1.334 },
-				{ src: '/projects/ref-summit/img-6.jpg', ratio: 1.334 }
-			],
-			// fila: solo, alineado a la izquierda (iMac cierre dark)
-			[{ src: '/projects/ref-summit/img-7.jpg', ratio: 1.334 }]
+				{ src: '/projects/ref-summit/img-7.jpg', ratio: 1.334 }
+			]
 		]
 	}
 ];
