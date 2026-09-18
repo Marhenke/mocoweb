@@ -376,7 +376,7 @@ export const processStepSchema = z
  * not a bug this schema should paper over. Edit the one the task actually
  * asks about.
  */
-const homeServiceSchema = z
+export const homeServiceSchema = z
 	.object({
 		n: z
 			.string()
@@ -409,7 +409,7 @@ const homeServiceSchema = z
 			'destination.'
 	);
 
-const estudioServiceSchema = z
+export const estudioServiceSchema = z
 	.object({
 		title: z
 			.string()

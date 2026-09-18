@@ -5,6 +5,9 @@
 	import PortfolioPreview from '$lib/components/PortfolioPreview.svelte';
 	import BouncingBand from '$lib/components/BouncingBand.svelte';
 	import Contact from '$lib/components/Contact.svelte';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 </script>
 
 <svelte:head>
@@ -15,9 +18,9 @@
 	/>
 </svelte:head>
 
-<Hero />
-<Statement />
-<Services />
-<PortfolioPreview />
+<Hero homeHero={data.homeHero} />
+<Statement statement={data.statement} />
+<Services services={data.homeServices} />
+<PortfolioPreview projects={data.projects} />
 <BouncingBand />
-<Contact />
+<Contact contactCta={data.contactCta} />

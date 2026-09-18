@@ -1,4 +1,9 @@
 <script lang="ts">
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
+	const { contactoHero, methods } = $derived(data);
+
 	let sent = $state(false);
 	let nombre = $state('');
 	let email = $state('');
@@ -11,13 +16,6 @@
 		window.location.href = `mailto:mocoestudiocreativo@gmail.com?subject=${subject}&body=${body}`;
 		sent = true;
 	}
-
-	const methods = [
-		{ label: 'Email', value: 'mocoestudiocreativo@gmail.com', href: 'mailto:mocoestudiocreativo@gmail.com' },
-		{ label: 'Instagram', value: '@mocoestudio_', href: 'https://www.instagram.com/mocoestudio_/' },
-		{ label: 'Ubicación', value: 'Buenos Aires, Argentina', href: null }
-	];
-
 </script>
 
 <svelte:head>
@@ -31,12 +29,12 @@
 		<!-- Columna izquierda: título + datos -->
 		<div class="flex flex-col gap-12">
 			<div>
-				<p class="mb-4 text-sm font-semibold tracking-wide text-muted uppercase">Contacto</p>
+				<p class="mb-4 text-sm font-semibold tracking-wide text-muted uppercase">{contactoHero.eyebrow}</p>
 				<h1 class="text-5xl font-extrabold tracking-tight sm:text-7xl" style="font-family: var(--font-display)">
-					¿Tenés algo en mente? Hablemos.
+					{contactoHero.title}
 				</h1>
 				<p class="mt-6 text-lg text-ink-soft">
-					Contanos un poco sobre tu proyecto y te respondemos en menos de 48 horas.
+					{contactoHero.intro}
 				</p>
 			</div>
 

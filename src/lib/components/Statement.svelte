@@ -1,4 +1,8 @@
 <script lang="ts">
+	import type { Statement } from '$lib/types';
+
+	let { statement }: { statement: Statement } = $props();
+
 	const fonts = [
 		'Georgia, serif',
 		'"Courier New", monospace',
@@ -20,10 +24,7 @@
 		el.style.fontFamily = '';
 	}
 
-	const words = [
-		'El', 'mundo', 'merece', 'conocerte,', 'nosotros', 'te',
-		'podemos', 'ayudar.',
-	];
+	const words = $derived(statement.text.split(' '));
 </script>
 
 <section class="bg-lime px-5 py-24 sm:px-8 sm:py-32">

@@ -1,8 +1,10 @@
 <script lang="ts">
-	import { projects } from '$lib/data/projects';
+	import type { Project } from '$lib/types';
 	import ProjectCard from './ProjectCard.svelte';
 
-	const featured = projects.slice(0, 4);
+	let { projects }: { projects: Project[] } = $props();
+
+	const featured = $derived(projects.slice(0, 4));
 </script>
 
 <section id="trabajos" class="px-5 py-24 sm:px-8 sm:py-32">
