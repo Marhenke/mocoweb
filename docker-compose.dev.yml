@@ -1,0 +1,31 @@
+# Local development Postgres for the CMS data layer.
+#
+# Production uses Railway's managed Postgres — this compose file exists only
+# to give local development (and this repo's own scripts/tests) a database to
+# talk to. Nothing here is required for the app to build or run in production.
+#
+# Usage:
+#   npm run db:up      # start (or resume) the container
+#   npm run db:down    # stop the container, keep data
+#   npm run db:reset   # stop and delete the volume (fresh database on next up)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: mocoweb
+      POSTGRES_PASSWORD: mocoweb
+      POSTGRES_DB: mocoweb
+    volumes:
+      - mocoweb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mocoweb -d mocoweb']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  mocoweb_pgdata:
