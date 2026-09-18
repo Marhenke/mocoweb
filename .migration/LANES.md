@@ -12,7 +12,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A1 | Congelar referencia: tag, 10 baselines, `verify.sh` | ✅ verificada |
 | A2 | Capa de datos: Docker Postgres, Drizzle, 7 tablas, migraciones | ✅ verificada |
 | A3 | `content.schema.ts` + seed (13 colecciones, 39 entries) | ✅ reportada |
-| A4 | Read path: componentes leen de la base | ⏸️ siguiente |
+| A4 | Read path: componentes leen de la base | ✅ **verificada** |
 | A5 | Media: bucket, `/media/*`, upload | pendiente |
 | A6 | OAuth Authorization Server | pendiente |
 | A7 | Tools MCP + descubrimiento | pendiente |
@@ -55,6 +55,23 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
    fila; 4 de 6 proyectos tienen filas mixtas (apaisada + vertical). El agente chequeó la realidad
    y ganó la realidad. Los briefs tienen que decir explícitamente *verificá contra los datos reales
    antes de endurecer una regla*, y los agentes tienen que sentirse autorizados a contradecir.
+
+9. **zsh no hace word-splitting de variables sin comillas.** `PSQL="docker exec ..."; $PSQL -c "..."` anda
+   en bash y falla con exit 127 en zsh. Los briefs ya avisan de los globs; hay que avisar de esto también.
+
+10. **"Byte a byte idéntico" es un criterio mal planteado para cualquier migración a CMS**, y hay que
+    corregirlo en la skill desde la lane 1 en vez de descubrirlo en la lane 4. Cuando el contenido deja
+    de venir compilado en el bundle y pasa a un `+page.server.ts`, SvelteKit **serializa el resultado del
+    load dentro del HTML** para poder hidratar. Ese payload no existía antes y no puede no existir ahora
+    (el acceso a la base tiene que ser server-only o las credenciales terminan en el cliente). No es un
+    bug ni ruido: es arquitectura. El criterio correcto es **"el visitante ve la misma página"**, con la
+    normalización del payload prevista de entrada.
+
+11. **Al ablandar un gate, exigir la prueba FAIL→PASS.** Se redefinió qué mide `verify.sh`; la
+    contrapartida obligatoria fue demostrar que sigue fallando ante un cambio real. Verificación
+    independiente: mutar `projects.racebox.title` hizo fallar **3** rutas — `/trabajos`,
+    `/trabajos/racebox` y `/trabajos/sergio-castiglione`, esta última porque muestra "Siguiente
+    proyecto → Racebox". El gate detecta propagación transitiva, no solo cambios directos.
 
 ## Huecos de descubrimiento que quedan abiertos (para A7)
 
