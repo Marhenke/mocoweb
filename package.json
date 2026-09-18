@@ -20,7 +20,9 @@
 		"db:down": "docker compose -f docker-compose.dev.yml down",
 		"db:reset": "docker compose -f docker-compose.dev.yml down -v",
 		"db:generate": "drizzle-kit generate",
-		"db:migrate": "node scripts/migrate.ts"
+		"db:migrate": "node scripts/migrate.ts",
+		"db:seed": "node scripts/seed.ts",
+		"db:verify-roundtrip": "node scripts/verify-roundtrip.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-node": "^5.5.4",
@@ -41,6 +43,7 @@
 	},
 	"dependencies": {
 		"drizzle-orm": "^0.45.2",
-		"postgres": "^3.4.9"
+		"postgres": "^3.4.9",
+		"zod": "^4.6.5"
 	}
 }
