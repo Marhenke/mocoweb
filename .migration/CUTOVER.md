@@ -1,6 +1,8 @@
 # Cutover plan — mocoweb CMS migration (Lane A9)
 
-**Status when this was written: NOT executed.** Everything below describes what
+**Status: EXECUTED 2026-09-19.** Cutover completed; deployment `1bc1a7b3` (commit `c0561c7`) is live at https://mocoestudio.com. All 10 production routes verified byte-identical to the frozen `pre-cms` baseline after normalization. Rollback target remains deployment `b4862cbe`. Original plan text follows.
+
+**Original status when written: NOT executed.** Everything below describes what
 a human operator should do, in order, after reviewing this document — no step
 here has been run against the live site. The Railway `mocoweb` project now
 has the new Postgres database and the new Bucket provisioned and fully
