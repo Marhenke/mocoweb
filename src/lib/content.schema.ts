@@ -752,6 +752,42 @@ export interface RouteDefinition {
 	label: string;
 	description: string;
 	regions: RouteRegion[];
+	/**
+	 * Resilience/caching classification for this route (Lane B2), NOT to be
+	 * confused with `{slug}` in `pattern` (a per-entry URL, still a
+	 * `RouteDefinition` of its own) or `RouteRegion.regenerateScope` (how far
+	 * a re-render's fan-out reaches) — this is a third, independent axis:
+	 * whether the route's RESPONSE can be shared across every visitor and
+	 * across time, i.e. whether the page cache (`src/lib/server/cms/cache/`)
+	 * is allowed to touch it at all.
+	 *
+	 *   - 'static' (every route on this site today): the response depends
+	 *     only on published content, is identical for every visitor, and is
+	 *     safe to render once at publish time and serve byte-for-byte from
+	 *     object storage thereafter. This is what makes "Postgres is not in
+	 *     the visitor's critical path" true for Moco.
+	 *   - 'dynamic': the response varies per visitor or per request (a cart,
+	 *     search results, anything session- or query-dependent) and MUST
+	 *     NEVER be written to or read from the shared page cache — caching it
+	 *     would silently serve one visitor's response (or a snapshot frozen
+	 *     at whatever moment it was cached) to every other visitor. A route
+	 *     marked 'dynamic' is invisible to `isKnownRoutePath` (so
+	 *     `hooks.server.ts` never checks the cache for it and always falls
+	 *     through to a live render) and is skipped entirely by
+	 *     `routesForCollection`'s regeneration fan-out (nothing is ever
+	 *     rendered-and-cached for it on publish).
+	 *
+	 * Moco is a portfolio: every page it has can be fully static, so every
+	 * entry below sets this to 'static'. This field exists anyway — declared
+	 * per-route from day one — because this engine is a template for future
+	 * client sites that WILL need a dynamic route (a cart, a gated area), and
+	 * retrofitting "does this route even mean the same thing to everyone" as
+	 * an afterthought, once several sites already assume "every route is
+	 * static", is far more expensive than reserving the slot now. No dynamic
+	 * route exists yet — this only wires the branch that will honor one when
+	 * the first client site declares it.
+	 */
+	caching: 'static' | 'dynamic';
 }
 
 export const siteRoutes: RouteDefinition[] = [
@@ -760,6 +796,7 @@ export const siteRoutes: RouteDefinition[] = [
 		label: 'Home',
 		description:
 			'The landing page: video hero, services teaser, a lime statement band, a portfolio preview, and a shared contact CTA.',
+		caching: 'static',
 		regions: [
 			{
 				region: 'hero',
@@ -793,6 +830,7 @@ export const siteRoutes: RouteDefinition[] = [
 		label: 'Estudio (studio/about)',
 		description:
 			"The studio's about page: hero, values grid, services accordion, process steps, team grid, shared contact CTA.",
+		caching: 'static',
 		regions: [
 			{
 				region: 'hero',
@@ -831,6 +869,7 @@ export const siteRoutes: RouteDefinition[] = [
 		label: 'Contacto',
 		description:
 			'The dedicated contact page: its own headline/intro plus a list of contact methods. Distinct from the shared `contactCta` band that appears elsewhere.',
+		caching: 'static',
 		regions: [
 			{
 				region: 'hero',
@@ -849,6 +888,7 @@ export const siteRoutes: RouteDefinition[] = [
 		label: 'Trabajos (portfolio index)',
 		description:
 			'The portfolio listing page: a header, the full project grid, and the shared contact CTA.',
+		caching: 'static',
 		regions: [
 			{
 				region: 'header',
@@ -872,6 +912,7 @@ export const siteRoutes: RouteDefinition[] = [
 		label: 'Trabajos detail (single project)',
 		description:
 			'A single project\'s case-study page, addressed by its entry slug. Also renders a "next project" link, computed as the following project by entry position (wrapping to the first after the last).',
+		caching: 'static',
 		regions: [
 			{
 				region: 'project',
@@ -893,20 +934,35 @@ export const siteRoutes: RouteDefinition[] = [
 
 export interface RegenerationRoute {
 	pattern: string;
-	/** True if `pattern` has a `{slug}` segment (a per-entry dynamic page). */
+	/**
+	 * True if `pattern` has a `{slug}` segment (a per-entry dynamic PAGE,
+	 * e.g. /trabajos/{slug}) — NOT to be confused with `RouteDefinition.caching
+	 * === 'dynamic'` (a per-VISITOR response). A route can have a `{slug}` and
+	 * still be fully static (every entry's rendered page is the same for
+	 * every visitor, just one page per entry) — that's what every route on
+	 * this site is today.
+	 */
 	dynamic: boolean;
 	regenerateScope: 'entry' | 'collection';
 }
 
 /**
  * True if `pathname` matches one of this site's declared page routes
- * (`siteRoutes`) — i.e. it is a page the static cache (Lane A8) may serve,
- * as opposed to an API/auth/media route or an unknown path. A single-source
- * check so the cache's notion of "a cacheable page" can never drift from
- * the routes `get_site_map` actually reports.
+ * (`siteRoutes`) AND that route is `caching: 'static'` — i.e. it is a page
+ * the static cache (Lane A8) may serve, as opposed to an API/auth/media
+ * route, an unknown path, or a route deliberately marked `'dynamic'` (see
+ * `RouteDefinition.caching`; no route on this site is 'dynamic' today). A
+ * single-source check so the cache's notion of "a cacheable page" can never
+ * drift from the routes `get_site_map` actually reports, and a future
+ * dynamic route is invisible to the cache by construction rather than by a
+ * caller remembering to exclude it.
  */
 export function isKnownRoutePath(pathname: string): boolean {
-	return siteRoutes.some((route) => routePatternMatches(route.pattern, pathname));
+	return (
+		siteRoutes.some(
+			(route) => route.caching === 'static' && routePatternMatches(route.pattern, pathname)
+		) || generatedDiscoveryFiles.some((f) => f.pattern === pathname)
+	);
 }
 
 function routePatternMatches(pattern: string, pathname: string): boolean {
@@ -921,10 +977,19 @@ function routePatternMatches(pattern: string, pathname: string): boolean {
 	return regex.test(pathname);
 }
 
-/** Every route (and its regeneration fan-out) that renders content from this collection. */
+/**
+ * Every STATIC route (and its regeneration fan-out) that renders content
+ * from this collection. A route declared `caching: 'dynamic'` is
+ * deliberately excluded — the whole point of that flag is that there is
+ * nothing to render-and-cache for it at publish time (see
+ * `RouteDefinition.caching`'s doc comment), so `regenerateForCollection`
+ * never even sees it as a candidate. No route is 'dynamic' on this site
+ * today, so this exclusion is currently a no-op in practice.
+ */
 export function routesForCollection(collectionKey: string): RegenerationRoute[] {
 	const out: RegenerationRoute[] = [];
 	for (const route of siteRoutes) {
+		if (route.caching !== 'static') continue;
 		for (const region of route.regions) {
 			if (region.collection !== collectionKey) continue;
 			out.push({
@@ -936,6 +1001,36 @@ export function routesForCollection(collectionKey: string): RegenerationRoute[] 
 	}
 	return out;
 }
+
+// ---------------------------------------------------------------------------
+// Generated discovery files (Lane B1) — /llms.txt, /llms-full.txt,
+// /sitemap.xml. Unlike a `siteRoute` region, these don't belong to any ONE
+// collection: llms-full.txt is explicitly "as complete as possible" (every
+// published collection, as prose), llms.txt indexes every page including
+// every project, and sitemap.xml needs a <url> for every published project.
+// A per-collection region list here would just enumerate all of
+// `collectionDefinitions` anyway, so instead each one is declared once and
+// `regenerateForCollection` (cache/regenerate.ts) always re-renders all
+// three on every publish/unpublish, regardless of which collection changed
+// — same reasoning as A5/A8's "under-invalidating silently serves stale
+// content" rule, applied to files instead of pages. They are intentionally
+// NOT added to `siteRoutes`/`routesForCollection`: they are not a page
+// `get_site_map` should describe to an editing agent (they're peers of
+// get_site_map, not regions within it), and `preview_url` has no meaningful
+// single-collection draft preview for a file that aggregates every
+// collection.
+export interface GeneratedFileDefinition {
+	/** The route path this file is served at, e.g. "/llms.txt". */
+	pattern: string;
+	/** Content-Type this path must be served/cached with. */
+	contentType: string;
+}
+
+export const generatedDiscoveryFiles: GeneratedFileDefinition[] = [
+	{ pattern: '/llms.txt', contentType: 'text/plain; charset=utf-8' },
+	{ pattern: '/llms-full.txt', contentType: 'text/plain; charset=utf-8' },
+	{ pattern: '/sitemap.xml', contentType: 'application/xml; charset=utf-8' }
+];
 
 export const collectionDefinitions: CollectionDefinition[] = [
 	{ key: 'projects', kind: 'list', label: 'Proyectos', schema: projectSchema },

@@ -6,7 +6,7 @@
  * rest of src/lib/server/cms/.
  */
 
-import type { Scope } from './scope';
+import { SCOPE_DESCRIPTIONS, type Scope } from './scope';
 
 function escapeHtml(value: string): string {
 	return value
@@ -91,15 +91,15 @@ export function renderAuthorizePage(params: AuthorizePageParams): string {
 			<legend>Access level</legend>
 			<label class="option">
 				<input type="radio" name="granted_scope" value="publish" ${params.defaultScope === 'publish' ? 'checked' : ''}>
-				Read, write, and publish — this app can view, change, AND publish content to the live site
+				${escapeHtml(SCOPE_DESCRIPTIONS.publish)}
 			</label>
 			<label class="option">
 				<input type="radio" name="granted_scope" value="write" ${params.defaultScope === 'write' ? 'checked' : ''}>
-				Read and write — this app can view and change draft content, but cannot publish it
+				${escapeHtml(SCOPE_DESCRIPTIONS.write)}
 			</label>
 			<label class="option">
 				<input type="radio" name="granted_scope" value="read" ${params.defaultScope === 'read' ? 'checked' : ''}>
-				Read-only — this app can only view content
+				${escapeHtml(SCOPE_DESCRIPTIONS.read)}
 			</label>
 		</fieldset>
 

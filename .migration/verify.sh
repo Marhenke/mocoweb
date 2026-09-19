@@ -2,10 +2,23 @@
 # .migration/verify.sh
 #
 # Rebuilds the site, serves it on PORT, captures the same 10 routes used for
-# the pre-cms baseline, normalizes away known build-to-build / render-to-render
+# the reference baseline, normalizes away known build-to-build / render-to-render
 # noise, and diffs against .migration/baseline/. Prints a PASS/FAIL summary.
 #
 # Usage: .migration/verify.sh   (run from anywhere; paths are resolved below)
+#
+# Baseline history (Lane B1 re-baseline):
+#   .migration/baseline/          -- CURRENT reference, what this script reads.
+#   .migration/baseline-pre-cms/  -- the ORIGINAL pre-CMS-migration baseline
+#     (tag `pre-cms`), preserved verbatim as a historical reference per the
+#     Lane B1 brief. It proved the CMS migration (Lanes A1-A9) lost nothing.
+#     It is no longer read by this script -- do not point BASELINE_DIR back
+#     at it, and do not delete it.
+#   Lane B1 (agent discovery: llms.txt, sitemap.xml, JSON-LD, <link rel>)
+#   legitimately changed the rendered HTML of all 10 routes (a new <link
+#   rel="mcp-server"> and JSON-LD <script> tag on every page), so the
+#   pre-cms baseline stopped being the right comparison target -- see
+#   LANES.md for the full list of Lane B1 diffs this re-baseline absorbed.
 
 set -u
 set -o pipefail
@@ -40,7 +53,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# route|filename pairs (same 10 routes captured in the pre-cms baseline)
+# route|filename pairs (same 10 routes captured in the reference baseline)
 ROUTES='
 /|home.html
 /trabajos|trabajos.html
@@ -241,7 +254,7 @@ EOF
 echo ""
 echo "===================================="
 if [ "$ANY_DIFF" -eq 0 ]; then
-	echo "PASS: all 10 routes match the pre-cms baseline (0 differences)."
+	echo "PASS: all 10 routes match the reference baseline (0 differences)."
 	EXIT_CODE=0
 else
 	echo "FAIL: differences found in:$DIFF_ROUTES"

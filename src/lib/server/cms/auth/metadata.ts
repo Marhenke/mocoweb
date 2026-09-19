@@ -12,6 +12,10 @@ export function protectedResourceMetadataUrl(origin: string): string {
 	return `${origin}/.well-known/oauth-protected-resource`;
 }
 
+export function authorizationServerMetadataUrl(origin: string): string {
+	return `${origin}/.well-known/oauth-authorization-server`;
+}
+
 export function protectedResourceMetadata(origin: string) {
 	return {
 		resource: origin,

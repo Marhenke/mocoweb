@@ -18,10 +18,55 @@ import {
 	nextAppendPublishedPosition
 } from '../entry-store';
 import { recordRevision, SEED_REVISION_CLIENT_ID } from '../revisions';
-import { regenerateForCollection } from '../../cache/regenerate';
+import {
+	validateRegeneration,
+	type FanOutOptions,
+	type RegenerateResult
+} from '../../cache/regenerate';
 import { signPreviewToken, PREVIEW_QUERY_PARAM } from '../../auth/preview-token';
 import { routesForCollection } from '$lib/content.schema';
 import { textResult, type ToolDefinition } from '../types';
+
+// ---------------------------------------------------------------------------
+// Publish-validation helper (Lane B2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The property the migration brief calls "publish must validate by
+ * rendering": renders every route this publish/unpublish would affect
+ * BEFORE trusting the DB write that just happened. If any of them fails to
+ * render, `rollback` (a caller-supplied compensating write that restores
+ * exactly what the DB looked like before this call) is invoked and the
+ * cache is left completely untouched — no path is deleted, overwritten, or
+ * cleared — so the previously published version keeps serving. Only on
+ * success is the cache actually written (`validation.commit()`).
+ *
+ * This must run AFTER the DB write it's validating (see
+ * `validateRegeneration`'s doc comment for why: the render is a real HTTP
+ * self-fetch on a separate Postgres connection, so it can only ever see
+ * committed data) — every call site here follows that order: write, then
+ * validate-or-rollback.
+ */
+async function publishOrRollback(
+	collectionKey: string,
+	fanOutOpts: FanOutOptions,
+	rollback: () => Promise<void>
+): Promise<{ ok: true; regen: RegenerateResult } | { ok: false; message: string }> {
+	const validation = await validateRegeneration(collectionKey, fanOutOpts);
+	if (validation.ok) {
+		return { ok: true, regen: await validation.commit() };
+	}
+	await rollback();
+	const failedPaths = validation.failures.map((f) => f.path).join(', ');
+	return {
+		ok: false,
+		message:
+			`Publish refused: rendering failed for ${failedPaths}. Nothing was changed — the DB write ` +
+			'was rolled back and the previously published version is still live and still cached. ' +
+			"Fix whatever's broken about that route's render (bad/missing referenced content is the " +
+			'usual cause), then publish again.'
+	};
+}
 
 // ---------------------------------------------------------------------------
 // publish
@@ -85,15 +130,25 @@ export const publishTool: ToolDefinition = {
 
 			if (row.pendingDelete) {
 				await db.delete(entries).where(eq(entries.id, row.id));
-				const regen = await regenerateForCollection(key, { removedSlugs: [row.slug] });
+				const outcome = await publishOrRollback(key, { removedSlugs: [row.slug] }, async () => {
+					// The row was deleted outright, not just modified — the only way
+					// to restore it is re-inserting the exact snapshot taken above.
+					await db.insert(entries).values(row);
+				});
+				if (!outcome.ok) return textResult(outcome.message, true);
 				return textResult({
 					collection: key,
 					deleted: row.slug,
-					regenerated: regen.regenerated,
-					invalidated: regen.invalidated
+					regenerated: outcome.regen.regenerated,
+					invalidated: outcome.regen.invalidated
 				});
 			}
 
+			const previous = {
+				publishedData: row.publishedData,
+				publishedPosition: row.publishedPosition,
+				status: row.status
+			};
 			const publishedPosition =
 				row.publishedPosition ?? (await nextAppendPublishedPosition(key));
 			const [updated] = await db
@@ -107,11 +162,17 @@ export const publishTool: ToolDefinition = {
 				.where(eq(entries.id, row.id))
 				.returning();
 
-			const regen = await regenerateForCollection(key, { changedSlug: row.slug });
+			const outcome = await publishOrRollback(key, { changedSlug: row.slug }, async () => {
+				await db
+					.update(entries)
+					.set({ ...previous, updatedAt: new Date() })
+					.where(eq(entries.id, row.id));
+			});
+			if (!outcome.ok) return textResult(outcome.message, true);
 			return textResult({
 				entry: serializeEntry(updated),
-				regenerated: regen.regenerated,
-				invalidated: regen.invalidated
+				regenerated: outcome.regen.regenerated,
+				invalidated: outcome.regen.invalidated
 			});
 		}
 
@@ -119,6 +180,11 @@ export const publishTool: ToolDefinition = {
 		if (collection.kind === 'singleton') {
 			const row = await resolveEntry(collection, {});
 			if (!row) return textResult(`Collection "${key}" has no entry to publish.`, true);
+			const previous = {
+				publishedData: row.publishedData,
+				publishedPosition: row.publishedPosition,
+				status: row.status
+			};
 			const [updated] = await db
 				.update(entries)
 				.set({
@@ -129,17 +195,29 @@ export const publishTool: ToolDefinition = {
 				})
 				.where(eq(entries.id, row.id))
 				.returning();
-			const regen = await regenerateForCollection(key, {});
+			const outcome = await publishOrRollback(key, {}, async () => {
+				await db
+					.update(entries)
+					.set({ ...previous, updatedAt: new Date() })
+					.where(eq(entries.id, row.id));
+			});
+			if (!outcome.ok) return textResult(outcome.message, true);
 			return textResult({
 				entry: serializeEntry(updated),
-				regenerated: regen.regenerated,
-				invalidated: regen.invalidated
+				regenerated: outcome.regen.regenerated,
+				invalidated: outcome.regen.invalidated
 			});
 		}
 
 		const rows = await listEntryRows(key);
 		const toDelete = rows.filter((r) => r.pendingDelete);
 		const toPublish = rows.filter((r) => !r.pendingDelete);
+		const previousPublishState = toPublish.map((r) => ({
+			id: r.id,
+			publishedData: r.publishedData,
+			publishedPosition: r.publishedPosition,
+			status: r.status
+		}));
 
 		for (const row of toDelete) {
 			await db.delete(entries).where(eq(entries.id, row.id));
@@ -156,18 +234,36 @@ export const publishTool: ToolDefinition = {
 				.where(eq(entries.id, row.id));
 		}
 
-		const regen = await regenerateForCollection(key, {
-			fullCollection: true,
-			removedSlugs: toDelete.map((r) => r.slug)
-		});
+		const outcome = await publishOrRollback(
+			key,
+			{ fullCollection: true, removedSlugs: toDelete.map((r) => r.slug) },
+			async () => {
+				for (const prev of previousPublishState) {
+					await db
+						.update(entries)
+						.set({
+							publishedData: prev.publishedData,
+							publishedPosition: prev.publishedPosition,
+							status: prev.status,
+							updatedAt: new Date()
+						})
+						.where(eq(entries.id, prev.id));
+				}
+				for (const row of toDelete) {
+					await db.insert(entries).values(row);
+				}
+			}
+		);
+		if (!outcome.ok) return textResult(outcome.message, true);
+
 		const publishedRows = await listEntryRows(key);
 		return textResult({
 			collection: key,
 			published: toPublish.map((r) => r.slug),
 			deleted: toDelete.map((r) => r.slug),
 			entries: publishedRows.map(serializeEntry),
-			regenerated: regen.regenerated,
-			invalidated: regen.invalidated
+			regenerated: outcome.regen.regenerated,
+			invalidated: outcome.regen.invalidated
 		});
 	}
 };
@@ -222,6 +318,12 @@ export const unpublishTool: ToolDefinition = {
 			return textResult(`Entry "${row.slug}" in collection "${key}" is not currently published.`, true);
 		}
 
+		const previous = {
+			publishedData: row.publishedData,
+			publishedPosition: row.publishedPosition,
+			pendingDelete: row.pendingDelete,
+			status: row.status
+		};
 		const [updated] = await db
 			.update(entries)
 			.set({
@@ -234,11 +336,17 @@ export const unpublishTool: ToolDefinition = {
 			.where(eq(entries.id, row.id))
 			.returning();
 
-		const regen = await regenerateForCollection(key, { removedSlugs: [row.slug] });
+		const outcome = await publishOrRollback(key, { removedSlugs: [row.slug] }, async () => {
+			await db
+				.update(entries)
+				.set({ ...previous, updatedAt: new Date() })
+				.where(eq(entries.id, row.id));
+		});
+		if (!outcome.ok) return textResult(outcome.message, true);
 		return textResult({
 			entry: serializeEntry(updated),
-			regenerated: regen.regenerated,
-			invalidated: regen.invalidated
+			regenerated: outcome.regen.regenerated,
+			invalidated: outcome.regen.invalidated
 		});
 	}
 };
