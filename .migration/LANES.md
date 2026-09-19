@@ -13,7 +13,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A2 | Capa de datos: Docker Postgres, Drizzle, 7 tablas, migraciones | ✅ verificada |
 | A3 | `content.schema.ts` + seed (13 colecciones, 39 entries) | ✅ reportada |
 | A4 | Read path: componentes leen de la base | ✅ **verificada** |
-| A5 | Media: bucket, `/media/*`, upload | pendiente |
+| A5 | Media: bucket, `/media/*`, upload | ✅ verificada |
 | A6 | OAuth Authorization Server | pendiente |
 | A7 | Tools MCP + descubrimiento | pendiente |
 | A8 | Borrador, publicación, regeneración estática | pendiente |
@@ -59,7 +59,44 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
 9. **zsh no hace word-splitting de variables sin comillas.** `PSQL="docker exec ..."; $PSQL -c "..."` anda
    en bash y falla con exit 127 en zsh. Los briefs ya avisan de los globs; hay que avisar de esto también.
 
-10. **"Byte a byte idéntico" es un criterio mal planteado para cualquier migración a CMS**, y hay que
+11. **MinIO Community Edition fue archivado/EOL en 2026** (dato dado en el brief de A5, verificado
+    aquí como premisa del propio brief, no re-chequeado contra la realidad externa) — no usarlo por
+    default en briefs futuros. **SeaweedFS** (`chrislusf/seaweedfs`, imagen activa) es un reemplazo
+    válido: habla S3 real (confirmado con el AWS SDK: crear bucket + put/get byte a byte), corre en
+    un solo contenedor sin sidecar de init.
+
+12. **SeaweedFS auto-acepta un `PutObject` en un bucket que nunca se creó formalmente, y después
+    ese mismo bucket falla todo `GetObject` con "NoSuchBucket"** — queda en un estado inconsistente
+    invisible hasta que alguien intenta leer. La lane A5 lo pisó: 70 uploads "exitosos" que después
+    no resolvían ninguno. Arreglo: llamar `HeadBucket`→`CreateBucket` (idempotente, ignora
+    `BucketAlreadyExists`/`BucketAlreadyOwnedByYou`) **antes** del primer `PutObject`, no confiar en
+    la auto-creación implícita. Un brief que diga "asumí que el bucket existe" para un servicio
+    S3-compatible nuevo se equivoca — hay que demostrar el ciclo put→get, no solo el put.
+
+13. **`sharp` no puede medir video** (mp4/webm/etc. — solo decodifica formatos de imagen fija), a
+    pesar de que un brief puede pedir "medí ancho/alto con sharp" sin distinguir. Para video real se
+    necesita un decodificador real: `ffprobe`, empaquetado sin instalación de sistema vía
+    `@ffprobe-installer/ffprobe` (binario estático per-plataforma, funciona igual en Railway).
+    Cualquier pipeline de medios que declare "todo con sharp" sin esta distinción está mal
+    especificado.
+
+14. **El cross-check de `ratio` contra archivos reales encontró un bug de contenido real**, no solo
+    una verificación que pasa: `barbara-plesky/foto-1.jpg`, `foto-2.jpg` y `foto-3.jpg` están
+    seteadas con `ratio: 0.75` (retrato) en el contenido pero son 1600×1200 (paisaje, ratio real
+    1.3333) — un guess a mano que nunca se validó contra el archivo. La lane A5 lo detectó, lo
+    reportó y **no lo corrigió** (mismo criterio que el bug "AV & Produs": corregir contenido no es
+    tarea de esta migración) — pero a diferencia de ese bug, este sí rompe el layout de la galería
+    hoy mismo, así que es candidato a una tarea de contenido separada, no a "dejar como está para
+    siempre".
+
+15. **Un archivo puede existir en `static/` sin que ningún `entries.data` lo referencie** (huérfano
+    de un commit anterior — se encontraron 3: `barbara-plesky/placa.jpg`, `ref-summit/img-6.jpg`,
+    `ref-summit/portada.jpg`). Un migrador de medios que solo copia "todo lo que hay en `static/`"
+    subiría basura; caminar el JSON de contenido real y quedarse solo con paths que aparecen ahí es
+    lo que evita eso — pero también significa que un brief que diga "migrá todo `static/`" es
+    impreciso: hay que migrar lo que el contenido referencia, no el directorio entero.
+
+16. **"Byte a byte idéntico" es un criterio mal planteado para cualquier migración a CMS**, y hay que
     corregirlo en la skill desde la lane 1 en vez de descubrirlo en la lane 4. Cuando el contenido deja
     de venir compilado en el bundle y pasa a un `+page.server.ts`, SvelteKit **serializa el resultado del
     load dentro del HTML** para poder hidratar. Ese payload no existía antes y no puede no existir ahora
@@ -67,7 +104,7 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
     bug ni ruido: es arquitectura. El criterio correcto es **"el visitante ve la misma página"**, con la
     normalización del payload prevista de entrada.
 
-11. **Al ablandar un gate, exigir la prueba FAIL→PASS.** Se redefinió qué mide `verify.sh`; la
+17. **Al ablandar un gate, exigir la prueba FAIL→PASS.** Se redefinió qué mide `verify.sh`; la
     contrapartida obligatoria fue demostrar que sigue fallando ante un cambio real. Verificación
     independiente: mutar `projects.racebox.title` hizo fallar **3** rutas — `/trabajos`,
     `/trabajos/racebox` y `/trabajos/sergio-castiglione`, esta última porque muestra "Siguiente
@@ -77,12 +114,24 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
 
 El JSON Schema servido todavía no le dice a un agente:
 - que `slug` y `position` son parámetros aparte, fuera de `data`
-- cómo obtener el `ratio` de un archivo (lo resuelve `upload_media` en A5)
+- ~~cómo obtener el `ratio` de un archivo~~ — resuelto en A5: `upload_media` (`src/lib/server/cms/media/upload.ts`)
+  lo mide del archivo real (sharp para imagen, ffprobe para video) y lo devuelve; un futuro tool MCP de
+  "subir media" debe llamarlo y usar el `ratio` que devuelve, nunca pedirle a un agente que lo estime.
 - cómo elegir el color `ink` de un proyecto mirando la portada
+- A7 también necesita saber que subir un archivo idéntico (mismo hash) es un no-op de storage (dedupe),
+  no un error — el schema no dice hoy qué significa que `upload_media` devuelva `deduped: true`.
 
 ## Bugs de contenido preexistentes (NO tocar en la migración)
 
 Preservados tal cual; arreglarlos es una tarea de contenido, no de migración:
 - Home dice **"AV & Produs"** (truncado, debería ser "AV & Producción") — `Services.svelte:15`
 - Home y `/estudio` tienen **dos listas de servicios distintas** con textos que divergieron
-- `npm run check` da un error de TS preexistente: falta `@types/node`
+- `npm run check` da un error de TS preexistente: falta `@types/node` (A5 agrega más ocurrencias del
+  mismo error preexistente en sus propios archivos nuevos, no un error nuevo — instalar `@types/node`
+  arreglaría todas de una vez, pero es una tarea de config, no de esta migración)
+- **`barbara-plesky/foto-1.jpg`, `foto-2.jpg`, `foto-3.jpg` tienen `ratio: 0.75` en el contenido pero
+  son 1600×1200 (ratio real 1.3333)** — encontrado por el cross-check de medición real en A5, no
+  corregido (ver defecto #14 arriba). Rompe la proporción de esas celdas en la galería hoy mismo.
+- `static/projects/barbara-plesky/placa.jpg`, `static/projects/ref-summit/img-6.jpg` y
+  `static/projects/ref-summit/portada.jpg` son archivos huérfanos (ningún `entries.data` los
+  referencia) — quedaron en el repo, no se migraron a medios ni se borraron.
