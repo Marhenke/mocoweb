@@ -12,14 +12,20 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getAccessTokenSigningKey } from './keys';
-import { isScope, type Scope } from './scope';
+import { isValidGrantedScope, type Scope } from './scope';
 
 export type { Scope };
 
 export interface AccessTokenPayload {
 	client_id: string;
 	client_name: string | null;
-	scope: Scope;
+	/**
+	 * The granted scope SET, as a space-delimited string (e.g. "write" or
+	 * "write inbox") — not a single `Scope`, since `inbox` is an independent
+	 * grant that can accompany any content level. See scope.ts's header
+	 * comment. Checked with `satisfiesScope`, never compared directly.
+	 */
+	scope: string;
 	iat: number;
 	exp: number;
 }
@@ -77,7 +83,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
 
 	const now = Math.floor(Date.now() / 1000);
 	if (typeof payload.exp !== 'number' || payload.exp < now) return null;
-	if (!isScope(payload.scope)) return null;
+	if (!isValidGrantedScope(payload.scope)) return null;
 	if (typeof payload.client_id !== 'string') return null;
 
 	return payload;

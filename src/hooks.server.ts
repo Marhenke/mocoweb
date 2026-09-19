@@ -48,6 +48,19 @@
  *        to prevent. `handleError` (below) is the last-resort net for
  *        anything that still throws past this — from here, from `resolve`,
  *        or from a route's own `load`.
+ *
+ * 5. First-party analytics (Lane B4). `recordPageView` is called for every
+ *    real page GET that reaches a response — on a cache HIT (line below the
+ *    cache read) as much as on a live render — because the brief explicitly
+ *    requires counting cache hits: most of this site's traffic IS a cache
+ *    hit, so recording only live renders would undercount nearly everything.
+ *    It is called WITHOUT `await` (fire-and-forget): the function itself
+ *    swallows every error internally (see `analytics/record.ts`) and never
+ *    does synchronous work, so it cannot slow down or break the response
+ *    being returned in the same tick. Excluded on purpose: preview requests
+ *    (the owner testing a draft, not a real visitor — handled by that
+ *    branch's own early return, below) and anything already excluded from
+ *    the cache path (data requests, sub-requests, non-GET).
  */
 
 import type { Handle, HandleServerError, ServerInit } from '@sveltejs/kit';
@@ -56,6 +69,7 @@ import { isInternalRenderRequest } from '$lib/server/cms/cache/internal-render';
 import { getCachedPage } from '$lib/server/cms/cache/store';
 import { verifyPreviewToken, PREVIEW_QUERY_PARAM } from '$lib/server/cms/auth/preview-token';
 import { startCacheWarm } from '$lib/server/cms/cache/warm';
+import { recordPageView } from '$lib/server/cms/analytics/record';
 
 /**
  * There is no IANA-registered `rel` value for "this is where the MCP server
@@ -157,12 +171,24 @@ export const handle: Handle = async ({ event, resolve }) => {
 				}
 			});
 			if (event.url.pathname === '/') addMcpLinkHeader(response, event.url.origin);
+			recordPageView({
+				pathname: event.url.pathname,
+				userAgent: event.request.headers.get('user-agent'),
+				referer: event.request.headers.get('referer'),
+				origin: event.url.origin
+			});
 			return response;
 		}
 	}
 
 	const response = await resolve(event);
 	if (event.url.pathname === '/') addMcpLinkHeader(response, event.url.origin);
+	recordPageView({
+		pathname: event.url.pathname,
+		userAgent: event.request.headers.get('user-agent'),
+		referer: event.request.headers.get('referer'),
+		origin: event.url.origin
+	});
 	return response;
 };
 

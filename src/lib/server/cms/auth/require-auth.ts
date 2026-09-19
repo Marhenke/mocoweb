@@ -23,7 +23,8 @@ import { protectedResourceMetadataUrl } from './metadata';
 export interface AuthContext {
 	clientId: string;
 	clientName: string | null;
-	scope: Scope;
+	/** The granted scope SET (e.g. "write" or "write inbox"), not a single Scope. See scope.ts. */
+	scope: string;
 }
 
 function challenge(origin: string, error: string, description: string): string {

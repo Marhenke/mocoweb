@@ -143,6 +143,93 @@ export const media = pgTable('media', {
 	createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 });
 
+/**
+ * A contact-form submission (Lane B4). This is the first anonymous WRITE
+ * path into the system — until now visitors only ever read — so it
+ * deliberately stores the minimum needed to let the owner read and respond
+ * to an inquiry: name, email, and message, exactly what the visitor typed.
+ *
+ * `ip_hash` is NEVER a raw IP address — see `contact/ip-hash.ts`. It is an
+ * HMAC of the submitter's IP, keyed by a value derived from `OWNER_KEY`
+ * (same HKDF pattern as every other derived key in `auth/keys.ts`), kept
+ * only so an abuse pattern (many submissions from one visitor) can be
+ * spotted later without the database ever holding anything that identifies
+ * where a real person connected from. It is nullable because a request with
+ * no discoverable client address (e.g. behind an unusual proxy chain)
+ * should never block a legitimate submission from being stored.
+ *
+ * `status` starts 'unread'; the `mark_inquiry_read` MCP tool (inbox scope)
+ * flips it to 'read'. There is no `deleted` state — nothing here yet needs
+ * moderation removal, only "seen it or not."
+ */
+export const inquiries = pgTable(
+	'inquiries',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		name: text('name').notNull(),
+		email: text('email').notNull(),
+		message: text('message').notNull(),
+		status: text('status').notNull().default('unread'), // 'unread' | 'read'
+		ipHash: text('ip_hash'),
+		notifiedAt: timestamp('notified_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		// The inbox's primary read pattern (list_inquiries) is newest-first,
+		// optionally filtered by status.
+		index('inquiries_created_at_idx').on(table.createdAt),
+		index('inquiries_status_created_at_idx').on(table.status, table.createdAt)
+	]
+);
+
+/**
+ * First-party, server-side analytics (Lane B4) — a PRE-AGGREGATED rollup,
+ * never one row per page view. Every field here is chosen so the row holds
+ * nothing that identifies a person: no IP (hashed or otherwise), no
+ * cross-request identifier, no cookie, no user agent string verbatim — just
+ * a day, a path, a coarse referrer bucket, and a coarse device bucket. That
+ * is what makes this legal/visually cookie-banner-free (see the Lane B4
+ * brief): there is no personal data to disclose or ask consent for.
+ *
+ * Granularity: one row per (day, path, referrer_host, device) combination,
+ * incremented with `count = count + 1` on every matching view (see
+ * `analytics/record.ts`). A day is coarse enough that even a traffic spike
+ * (a shared link going around) still lands on the same handful of rows —
+ * bounded by (days × distinct paths × distinct referrer buckets × 4 device
+ * buckets), not by view volume — while still answering every question the
+ * brief names: "views this week" (sum rows in a date range), "which project
+ * gets the most views" (group by path), "where does my traffic come from"
+ * (group by referrer_host). An hourly grain was considered and rejected: it
+ * multiplies row count 24x for a small portfolio site with no need for
+ * intra-day resolution, for no question this system is asked to answer.
+ */
+export const pageViewStats = pgTable(
+	'page_view_stats',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		day: text('day').notNull(), // 'YYYY-MM-DD', UTC
+		path: text('path').notNull(),
+		/** Normalized host of the Referer header ("instagram.com"), or 'direct' when absent. Never a full URL (a full referrer URL can itself carry identifying query params). */
+		referrerHost: text('referrer_host').notNull(),
+		/** 'mobile' | 'tablet' | 'desktop' | 'other', parsed from User-Agent — never the raw UA string. */
+		device: text('device').notNull(),
+		count: integer('count').notNull().default(0),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		uniqueIndex('page_view_stats_day_path_referrer_device_key').on(
+			table.day,
+			table.path,
+			table.referrerHost,
+			table.device
+		),
+		// The two read patterns MCP analytics tools actually use: "everything
+		// in a date range" and "everything for one page across all time."
+		index('page_view_stats_day_idx').on(table.day),
+		index('page_view_stats_path_idx').on(table.path)
+	]
+);
+
 /** A registered OAuth client (an MCP client application) allowed to connect. */
 export const oauthClients = pgTable('oauth_clients', {
 	clientId: text('client_id').primaryKey(),

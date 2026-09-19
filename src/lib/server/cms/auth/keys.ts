@@ -65,3 +65,16 @@ export function getRefreshTokenHashKey(): Buffer {
 export function getPreviewTokenSigningKey(): Buffer {
 	return derive('mocoweb-cms:preview-token:v1');
 }
+
+/**
+ * Key used to HMAC a visitor's IP address before it is ever used as a
+ * rate-limit bucket key or stored on an `inquiries` row (Lane B4). A raw IP
+ * is never stored or logged anywhere — see `contact/ip-hash.ts`, the one
+ * place this key is read. Deriving it from OWNER_KEY (rather than a fixed
+ * salt) means rotating OWNER_KEY also retires every previously-computed
+ * hash, consistent with every other derived key in this file — a stray
+ * pre-rotation hash can never be correlated with a post-rotation one.
+ */
+export function getIpHashKey(): Buffer {
+	return derive('mocoweb-cms:ip-hash:v1');
+}

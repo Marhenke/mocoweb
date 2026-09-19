@@ -46,8 +46,11 @@ export function authorizationServerMetadata(origin: string) {
 		// find out. See scopes_supported above for what each level in
 		// granted_scope on that form actually grants.
 		moco_authorization_endpoint_ui:
-			'form: GET returns a self-contained HTML page with a single owner-key password field and an access-level ' +
-			'radio group (read / write / publish) — not a redirect to a hosted login provider. Render/open it for a ' +
-			'human to fill in; there is no programmatic way to complete authorization without one.'
+			'form: GET returns a self-contained HTML page with a single owner-key password field, a content ' +
+			'access-level radio group (read / write / publish), and a SEPARATE "inbox" checkbox — not a redirect ' +
+			'to a hosted login provider. inbox is independent of the content radio group: it grants (or withholds) ' +
+			'access to contact-form submissions regardless of which content level is chosen, and must be checked ' +
+			'explicitly — no content level implies it. Render/open the page for a human to fill in; there is no ' +
+			'programmatic way to complete authorization without one.'
 	};
 }

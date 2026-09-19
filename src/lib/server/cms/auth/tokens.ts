@@ -11,7 +11,9 @@ import { and, eq, isNull, gt } from 'drizzle-orm';
 import { db } from '../db/client';
 import { oauthClients, oauthAuthCodes, oauthRefreshTokens } from '../db/schema';
 import { getRefreshTokenHashKey } from './keys';
-import type { Scope } from './scope';
+// NOTE: fields below typed `string` (not `Scope`) hold a granted SCOPE SET
+// (e.g. "write" or "write inbox"), per scope.ts's header comment — never a
+// single content-ladder value once `inbox` exists as an independent grant.
 
 // ---------------------------------------------------------------------------
 // Owner key comparison
@@ -96,7 +98,7 @@ export async function createAuthorizationCode(params: {
 	clientId: string;
 	redirectUri: string;
 	codeChallenge: string;
-	scope: Scope;
+	scope: string;
 }): Promise<string> {
 	const code = randomBytes(32).toString('base64url');
 	await db.insert(oauthAuthCodes).values({
@@ -115,7 +117,7 @@ export interface ConsumedAuthorizationCode {
 	clientId: string;
 	redirectUri: string;
 	codeChallenge: string;
-	scope: Scope;
+	scope: string;
 }
 
 /**
@@ -139,7 +141,7 @@ export async function consumeAuthorizationCode(
 		clientId: row.clientId,
 		redirectUri: row.redirectUri,
 		codeChallenge: row.codeChallenge,
-		scope: row.scope as Scope
+		scope: row.scope
 	};
 }
 
@@ -153,7 +155,7 @@ function hashRefreshToken(raw: string): string {
 	return createHmac('sha256', getRefreshTokenHashKey()).update(raw).digest('hex');
 }
 
-async function insertRefreshToken(clientId: string, scope: Scope): Promise<string> {
+async function insertRefreshToken(clientId: string, scope: string): Promise<string> {
 	const raw = randomBytes(32).toString('base64url');
 	await db.insert(oauthRefreshTokens).values({
 		tokenHash: hashRefreshToken(raw),
@@ -164,14 +166,14 @@ async function insertRefreshToken(clientId: string, scope: Scope): Promise<strin
 	return raw;
 }
 
-export async function createRefreshToken(clientId: string, scope: Scope): Promise<string> {
+export async function createRefreshToken(clientId: string, scope: string): Promise<string> {
 	return insertRefreshToken(clientId, scope);
 }
 
 export interface RotatedRefreshToken {
 	refreshToken: string;
 	clientId: string;
-	scope: Scope;
+	scope: string;
 }
 
 /**
@@ -218,6 +220,6 @@ export async function rotateRefreshToken(rawToken: string): Promise<RotatedRefre
 		.returning();
 	if (revoked.length === 0) return null; // lost the race to another concurrent rotation
 
-	const newRaw = await insertRefreshToken(row.clientId, row.scope as Scope);
-	return { refreshToken: newRaw, clientId: row.clientId, scope: row.scope as Scope };
+	const newRaw = await insertRefreshToken(row.clientId, row.scope);
+	return { refreshToken: newRaw, clientId: row.clientId, scope: row.scope };
 }

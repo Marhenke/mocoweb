@@ -12,7 +12,7 @@ import { validateAuthorizeRequest } from '$lib/server/cms/auth/authorize-request
 import { renderAuthorizePage, renderAuthorizeErrorPage } from '$lib/server/cms/auth/authorize-page';
 import { isOwnerKeyValid, createAuthorizationCode } from '$lib/server/cms/auth/tokens';
 import { checkRateLimit } from '$lib/server/cms/auth/rate-limit';
-import { isScope } from '$lib/server/cms/auth/scope';
+import { isContentScope, contentPartOf } from '$lib/server/cms/auth/scope';
 import type { RequestHandler } from './$types';
 
 function htmlResponse(body: string, status = 200): Response {
@@ -75,7 +75,16 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 
 	const submittedKey = form.get('owner_key');
 	const grantedScopeRaw = form.get('granted_scope');
-	const grantedScope = isScope(grantedScopeRaw) ? grantedScopeRaw : validated.requestedScope;
+	// The content level (read/write/publish) is a radio group — exactly one
+	// value or none. `inbox` is a wholly separate checkbox, independently
+	// combinable with any content level (see scope.ts's header comment): its
+	// presence/absence here does not affect which content-level radio was
+	// picked, and vice versa.
+	const grantedContent = isContentScope(grantedScopeRaw)
+		? grantedScopeRaw
+		: contentPartOf(validated.requestedScope);
+	const grantedInbox = form.get('granted_scope_inbox') === 'inbox';
+	const grantedScope = grantedInbox ? `${grantedContent} inbox` : grantedContent;
 
 	if (typeof submittedKey !== 'string' || submittedKey.length === 0 || !isOwnerKeyValid(submittedKey)) {
 		return htmlResponse(
