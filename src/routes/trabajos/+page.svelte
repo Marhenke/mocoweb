@@ -2,7 +2,9 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ProjectCard from '$lib/components/ProjectCard.svelte';
 	import Contact from '$lib/components/Contact.svelte';
-	import { projects } from '$lib/data/projects';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 </script>
 
 <svelte:head>
@@ -11,19 +13,19 @@
 </svelte:head>
 
 <PageHeader
-	eyebrow="Trabajos"
-	title="Marcas con las que nos divertimos."
-	intro="Una selección de proyectos. Cada uno empezó con una charla y terminó en algo con identidad propia."
+	eyebrow={data.trabajosHeader.eyebrow}
+	title={data.trabajosHeader.title}
+	intro={data.trabajosHeader.intro}
 />
 
 <section class="px-5 pb-24 sm:px-8 sm:pb-32">
 	<div class="mx-auto max-w-7xl">
 		<div class="grid gap-6 sm:grid-cols-2">
-			{#each projects as project}
+			{#each data.projects as project}
 				<ProjectCard {project} />
 			{/each}
 		</div>
 	</div>
 </section>
 
-<Contact />
+<Contact contactCta={data.contactCta} />

@@ -15,7 +15,14 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "prettier --check .",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"db:up": "docker compose -f docker-compose.dev.yml up -d",
+		"db:down": "docker compose -f docker-compose.dev.yml down",
+		"db:reset": "docker compose -f docker-compose.dev.yml down -v",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "node scripts/migrate.ts",
+		"db:seed": "node scripts/seed.ts",
+		"db:verify-roundtrip": "node scripts/verify-roundtrip.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-node": "^5.5.4",
@@ -23,6 +30,8 @@
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/typography": "^0.5.19",
 		"@tailwindcss/vite": "^4.3.0",
+		"dotenv": "^18.0.0",
+		"drizzle-kit": "^0.31.10",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^4.1.0",
 		"prettier-plugin-tailwindcss": "^0.8.0",
@@ -31,5 +40,13 @@
 		"tailwindcss": "^4.3.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.0.16"
+	},
+	"dependencies": {
+		"@aws-sdk/client-s3": "^3.1136.0",
+		"@ffprobe-installer/ffprobe": "^2.1.2",
+		"drizzle-orm": "^0.45.2",
+		"postgres": "^3.4.9",
+		"sharp": "^0.35.4",
+		"zod": "^4.6.5"
 	}
 }

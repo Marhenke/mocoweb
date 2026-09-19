@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "mocoweb",
+      "credentials": [
+        {
+          "accessKey": "devaccesskeyid",
+          "secretKey": "devsecretaccesskey"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write"]
+    }
+  ]
+}

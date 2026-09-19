@@ -2,96 +2,14 @@
 	import Contact from '$lib/components/Contact.svelte';
 	import SocialIcon from '$lib/components/SocialIcon.svelte';
 	import LogoRain from '$lib/components/LogoRain.svelte';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
+	const { estudioHero, values, services, process, team, contactCta } = $derived(data);
 
 	// Acordeón de servicios
 	let openService = $state<number | null>(0);
 	const toggleService = (i: number) => (openService = openService === i ? null : i);
-
-	const values = [
-		{
-			title: 'Explorar',
-			desc: 'Nos gusta descubrir lo que hay detrás de cada proyecto. Las mejores ideas aparecen cuando hacemos las preguntas correctas.'
-		},
-		{
-			title: 'Conexión',
-			desc: 'Trabajamos desde lo humano. Entender a las personas detrás de una marca es parte de crear algo verdadero.'
-		},
-		{
-			title: 'Ideas con sentido',
-			desc: 'No buscamos hacer por hacer. Buscamos que cada decisión tenga una razón y que cada proyecto tenga algo para decir.'
-		},
-		{
-			title: 'Movimiento',
-			desc: 'Pensamos rápido, probamos, ajustamos y avanzamos. La creatividad también está en hacer que las cosas pasen.'
-		},
-		{
-			title: 'Identidad',
-			desc: 'Cada proyecto tiene algo único. Nuestro trabajo es encontrarlo y darle una forma propia.'
-		},
-		{
-			title: 'Claridad',
-			desc: 'Hacemos lugar entre tanto ruido. Buscamos que cada marca encuentre una forma clara y propia de decir lo que tiene para decir.'
-		}
-	];
-
-	const process = [
-		['Escuchamos', 'Entendemos tu marca, tu público y a dónde querés llegar.'],
-		['Exploramos', 'Probamos ideas, direcciones y conceptos hasta dar con el correcto.'],
-		['Creamos', 'Diseñamos y pulimos cada pieza con foco en el detalle.'],
-		['Lanzamos', 'Entregamos todo listo para usar, con acompañamiento.']
-	];
-
-	const services = [
-		{
-			title: 'Branding & Identidad',
-			desc: 'Creamos logos, sistemas visuales y manuales de marca completos. Definimos colores, tipografías y un lenguaje gráfico propio para que tu marca se vea distinta, coherente y reconocible en todos los puntos de contacto, del feed a lo impreso. Trabajamos desde la estrategia hasta el último detalle, para que tu identidad no sea solo linda sino que también diga lo que tu marca quiere decir y se sostenga en el tiempo.'
-		},
-		{
-			title: 'Diseño Web',
-			desc: 'Diseñamos y desarrollamos sitios rápidos, lindos y fáciles de usar. Desde una landing hasta una tienda online, pensados para verse bien en cualquier dispositivo y para convertir visitas en clientes. Nos ocupamos de toda la experiencia: la estructura, el diseño, los textos y el desarrollo, dejándote un sitio listo para usar, fácil de actualizar y pensado para crecer con tu proyecto.'
-		},
-		{
-			title: 'AV & Producción',
-			desc: 'Producimos foto y video con mirada de autor: contenido para redes, piezas de marca y material audiovisual listo para compartir. Nos encargamos de la idea, la producción y la edición de principio a fin. Desde reels y campañas hasta videos institucionales, cuidamos cada plano para que el resultado tenga la calidad y la personalidad que tu marca merece.'
-		},
-		{
-			title: 'Cobertura de eventos',
-			desc: 'Registramos tus eventos de principio a fin. Foto, video, pantallas en vivo, aftermovie e historias en tiempo real para capturar y comunicar los momentos que importan. Estamos donde pasa la acción para que no se te escape nada, y te entregamos el material editado y listo para publicar, manteniendo viva la energía del evento también en tus redes.'
-		},
-		{
-			title: 'Servicios digitales',
-			desc: 'Mantenemos tu marca activa en redes: diseño de placas para redes sociales, producción de reels y community management. Planificamos, creamos y publicamos contenido con una voz coherente y constante. Pensamos una estrategia de contenido, armamos el calendario, respondemos a tu comunidad y medimos resultados para que tu presencia digital crezca de forma sostenida.'
-		},
-		{
-			title: 'Diseño gráfico',
-			desc: 'Diseñamos todas las piezas que tu comunicación necesita: flyers, newsletters, presentaciones y material gráfico, siempre con la identidad de tu marca y atención al detalle. Ya sea para imprimir o para pantalla, traducimos cada mensaje en piezas claras y atractivas que mantienen la coherencia visual de tu marca en cada formato.'
-		}
-	];
-
-	// Links de redes: placeholders por ahora, los reemplazamos por los reales.
-	const team = [
-		{
-			name: 'Mar',
-			photo: '/team/mar.jpg',
-			role: 'Lic. en Diseño',
-			socials: [
-				{ name: 'instagram', href: 'https://www.instagram.com/marlene.formulafan/' },
-				{ name: 'tiktok', href: 'https://www.tiktok.com/@marlene.formulafan' },
-				{ name: 'youtube', href: 'https://www.youtube.com/@FormulaFan-f4r' }
-			]
-		},
-		{
-			name: 'Gegen',
-			photo: '/team/gegen.jpg',
-			role: 'Lic. en Comunicación',
-			socials: [
-				{ name: 'instagram', href: 'https://www.instagram.com/gegen_._/' },
-				{ name: 'tiktok', href: 'https://www.tiktok.com/@gegenn___' },
-				{ name: 'youtube', href: 'https://www.youtube.com/channel/UC2VZHTMSspMjD8niEzacPvg' },
-				{ name: 'spotify', href: 'https://open.spotify.com/artist/2bFB8J4t9LQDbls4tjE5IJ' }
-			]
-		}
-	] as const;
 </script>
 
 <svelte:head>
@@ -106,21 +24,19 @@
 		<div class="float-up flex flex-col lg:col-span-2">
 			<p class="mb-5 flex items-center gap-2 text-sm font-semibold tracking-wide text-cream/70 uppercase">
 				<span class="inline-block h-2 w-2 rounded-full bg-lime"></span>
-				El estudio
+				{estudioHero.eyebrow}
 			</p>
 			<h1
 				class="text-[2.8rem] leading-[0.95] font-extrabold tracking-tight sm:text-6xl"
 				style="font-family: var(--font-display)"
 			>
-				Un estudio creativo que encuentra sentido y lo transforma en realidad.
+				{estudioHero.title}
 			</h1>
 			<p class="mt-6 text-lg text-cream/80 sm:text-xl">
-				Somos Moco, un estudio creativo independiente. Trabajamos cerca de cada proyecto para
-				entender su esencia, descubrir oportunidades y construir soluciones con identidad propia.
+				{estudioHero.paragraphs[0]}
 			</p>
 			<p class="mt-4 text-lg text-cream/80 sm:text-xl">
-				Nos involucramos en el proceso, combinando estrategia, diseño y creatividad para
-				transformar ideas en marcas que conectan.
+				{estudioHero.paragraphs[1]}
 			</p>
 		</div>
 
@@ -193,12 +109,12 @@
 			Cómo trabajamos
 		</h2>
 		<div class="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-			{#each process as [title, desc], i}
+			{#each process as step, i}
 				<div class="flex flex-col gap-4">
 					<span class="flex h-10 w-10 items-center justify-center rounded-full bg-lime text-sm font-bold text-ink">{i + 1}</span>
 					<div>
-						<div class="text-lg font-semibold">{title}</div>
-						<div class="mt-1 text-sm text-cream/70">{desc}</div>
+						<div class="text-lg font-semibold">{step.title}</div>
+						<div class="mt-1 text-sm text-cream/70">{step.desc}</div>
 					</div>
 				</div>
 			{/each}
@@ -241,4 +157,4 @@
 	</div>
 </section>
 
-<Contact />
+<Contact {contactCta} />

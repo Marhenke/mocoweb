@@ -1,36 +1,7 @@
 <script lang="ts">
-	const services = [
-		{
-			n: '01',
-			title: 'Branding & Identidad',
-			desc: 'Logos, sistemas visuales y manuales de marca. Te ayudamos a verte distinto y consistente en todos lados.'
-		},
-		{
-			n: '02',
-			title: 'Diseño Web',
-			desc: 'Sitios rápidos, lindos y fáciles de usar. Desde landings hasta tiendas, pensados para convertir.'
-		},
-		{
-			n: '03',
-			title: 'AV & Produs',
-			desc: 'Audiovisual y producción: foto, video y contenido para redes con mirada de autor, listo para compartir.'
-		},
-		{
-			n: '04',
-			title: 'Cobertura de eventos',
-			desc: 'Registramos tus eventos de principio a fin, capturando los momentos que importan.'
-		},
-		{
-			n: '05',
-			title: 'Servicios digitales',
-			desc: 'Placas para redes sociales, reels y community management para mantener tu marca activa.'
-		},
-		{
-			n: '06',
-			title: 'Diseño gráfico',
-			desc: 'Flyers, newsletters y piezas gráficas con la identidad de tu marca, para toda tu comunicación.'
-		}
-	];
+	import type { HomeService } from '$lib/types';
+
+	let { services }: { services: HomeService[] } = $props();
 </script>
 
 <section id="servicios" class="px-5 py-24 sm:px-8 sm:py-32">

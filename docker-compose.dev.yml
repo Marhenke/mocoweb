@@ -1,0 +1,71 @@
+# Local development Postgres for the CMS data layer.
+#
+# Production uses Railway's managed Postgres — this compose file exists only
+# to give local development (and this repo's own scripts/tests) a database to
+# talk to. Nothing here is required for the app to build or run in production.
+#
+# Usage:
+#   npm run db:up      # start (or resume) the container
+#   npm run db:down    # stop the container, keep data
+#   npm run db:reset   # stop and delete the volume (fresh database on next up)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_USER: mocoweb
+      POSTGRES_PASSWORD: mocoweb
+      POSTGRES_DB: mocoweb
+    volumes:
+      - mocoweb_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mocoweb -d mocoweb']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  # Local S3-compatible object storage for the media engine (Lane A5).
+  #
+  # Production uses Railway Buckets (S3-compatible, private, credentials
+  # injected as BUCKET/ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY/REGION) — this
+  # container exists only so local dev and this repo's own scripts have an S3
+  # API to talk to. The app code only ever speaks the S3 API via the AWS SDK;
+  # nothing is provider-specific.
+  #
+  # Picked SeaweedFS over MinIO: MinIO Community Edition was archived/EOL'd in
+  # 2026, so it's not a safe default to reach for anymore. SeaweedFS is
+  # actively maintained, ships a real S3-compatible gateway (verified here
+  # with the AWS SDK: bucket create + put/get round-trip), and needs no extra
+  # init container — the identity/credential config below is enough to bring
+  # up an authenticated S3 endpoint with one `docker compose up`.
+  seaweedfs:
+    image: chrislusf/seaweedfs:3.97
+    restart: unless-stopped
+    ports:
+      - '9000:8333'
+    volumes:
+      - mocoweb_media:/data
+      - ./docker/seaweedfs-s3-config.json:/etc/seaweedfs/s3-config.json:ro
+    command:
+      - server
+      - -dir=/data
+      - -s3
+      - -s3.port=8333
+      - -s3.config=/etc/seaweedfs/s3-config.json
+      - -master.volumeSizeLimitMB=100
+    healthcheck:
+      # Just confirm the S3 port accepts connections -- an unauthenticated
+      # HTTP request would "fail" with a 403 (AccessDenied), which is
+      # actually the correct/ready state (credentials being enforced), so a
+      # plain TCP check is the right readiness probe here.
+      test: ['CMD', 'nc', '-z', '127.0.0.1', '8333']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  mocoweb_pgdata:
+  mocoweb_media:
