@@ -4,6 +4,7 @@
 		"builder": "NIXPACKS"
 	},
 	"deploy": {
+		"preDeployCommand": "node scripts/migrate.ts",
 		"startCommand": "node build",
 		"restartPolicyType": "ON_FAILURE",
 		"restartPolicyMaxRetries": 10,
