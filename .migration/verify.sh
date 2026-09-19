@@ -144,6 +144,85 @@ done <<EOF
 $ROUTES
 EOF
 
+# ---------------------------------------------------------------------------
+# Data-endpoint check (Lane B3).
+#
+# The production outage this lane responds to: SvelteKit normalizes a
+# client-side navigation request for `/estudio/__data.json` into
+# `url.pathname === '/estudio'` with `event.isDataRequest === true` BEFORE
+# `hooks.server.ts` ever runs. Every check above (and every check this
+# script has ever had) only ever asks for the page route itself with a
+# plain GET -- exactly what a hard page load sends, and exactly what the
+# cache bug above answered correctly throughout the incident. It never asks
+# for the ONE OTHER request shape a real visitor's browser actually makes:
+# every click after the first, which SvelteKit's client router serves by
+# fetching that same route's JSON data endpoint instead of re-fetching HTML.
+# `curl`-against-HTML-routes is "the convenient tool" the postmortem calls
+# out by name; this is "the one a real user's router uses".
+#
+# The URL shape below (`<pathname>/__data.json`, or bare `/__data.json` for
+# the root) was verified against this repo's installed SvelteKit version
+# (2.63) by starting `node build` locally and inspecting the actual request
+# a browser's client router sends on an in-app navigation -- not assumed
+# from a brief or from memory of some other version.
+#
+# A response that is anything other than HTTP 200 with an `application/json`
+# Content-Type and a body that actually parses as JSON is exactly what the
+# page cache served for every route during the outage (200, `text/html`,
+# the page's own rendered document) -- so this check alone would have
+# caught it, cheaply, without a browser.
+echo "==> Checking client-navigation data endpoints (Content-Type: application/json)..."
+DATA_TMP="$SCRIPT_DIR/.data_endpoint_body"
+DATA_HEADERS="$SCRIPT_DIR/.data_endpoint_headers"
+DATA_ENDPOINT_FAIL=0
+DATA_ENDPOINT_FAIL_ROUTES=""
+
+while IFS='|' read -r route file; do
+	[ -z "$route" ] && continue
+
+	if [ "$route" = "/" ]; then
+		data_url="http://localhost:$PORT/__data.json"
+	else
+		data_url="http://localhost:$PORT${route}/__data.json"
+	fi
+
+	http_code=$(curl -s -o "$DATA_TMP" -D "$DATA_HEADERS" -w '%{http_code}' "$data_url")
+
+	if [ "$http_code" != "200" ]; then
+		echo "  !! $data_url -> HTTP $http_code (expected 200)"
+		DATA_ENDPOINT_FAIL=1
+		DATA_ENDPOINT_FAIL_ROUTES="$DATA_ENDPOINT_FAIL_ROUTES $route"
+		continue
+	fi
+
+	content_type=$(grep -i '^content-type:' "$DATA_HEADERS" | tail -1 | cut -d' ' -f2- | tr -d '\r\n')
+	case "$content_type" in
+		application/json*) : ;;
+		*)
+			echo "  !! $data_url -> Content-Type '$content_type' (expected application/json*)"
+			DATA_ENDPOINT_FAIL=1
+			DATA_ENDPOINT_FAIL_ROUTES="$DATA_ENDPOINT_FAIL_ROUTES $route"
+			continue
+			;;
+	esac
+
+	if ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'))" "$DATA_TMP" 2>/dev/null; then
+		echo "  !! $data_url -> body did not parse as JSON"
+		DATA_ENDPOINT_FAIL=1
+		DATA_ENDPOINT_FAIL_ROUTES="$DATA_ENDPOINT_FAIL_ROUTES $route"
+	fi
+done <<EOF
+$ROUTES
+EOF
+
+rm -f "$DATA_TMP" "$DATA_HEADERS"
+
+if [ "$DATA_ENDPOINT_FAIL" -eq 0 ]; then
+	echo "  OK: all data endpoints returned 200 application/json, parseable."
+else
+	echo "  FAIL: data endpoint(s) broken for:$DATA_ENDPOINT_FAIL_ROUTES"
+fi
+
 MEDIA_MAP="$SCRIPT_DIR/media-map.json"
 echo "==> Generating media URL map (pre-cms tag + baseline captures)..."
 if ! node "$SCRIPT_DIR/generate-media-map.mjs" >"$MEDIA_MAP"; then
@@ -254,16 +333,24 @@ EOF
 echo ""
 echo "===================================="
 if [ "$ANY_DIFF" -eq 0 ]; then
-	echo "PASS: all 10 routes match the reference baseline (0 differences)."
-	EXIT_CODE=0
+	echo "PASS (HTML): all 10 routes match the reference baseline (0 differences)."
 else
-	echo "FAIL: differences found in:$DIFF_ROUTES"
+	echo "FAIL (HTML): differences found in:$DIFF_ROUTES"
 	echo ""
 	echo "Run e.g.:"
 	for r in $DIFF_ROUTES; do
 		f=$(echo "$ROUTES" | awk -F'|' -v rt="${r%%(*}" '$1==rt{print $2}')
 		[ -n "$f" ] && echo "  diff .migration/.normalized/baseline/$f .migration/.normalized/current/$f"
 	done
+fi
+if [ "$DATA_ENDPOINT_FAIL" -eq 0 ]; then
+	echo "PASS (data endpoints): all __data.json endpoints are application/json and parse."
+else
+	echo "FAIL (data endpoints):$DATA_ENDPOINT_FAIL_ROUTES -- see 'Checking client-navigation data endpoints' above."
+fi
+if [ "$ANY_DIFF" -eq 0 ] && [ "$DATA_ENDPOINT_FAIL" -eq 0 ]; then
+	EXIT_CODE=0
+else
 	EXIT_CODE=1
 fi
 echo "===================================="

@@ -37,7 +37,13 @@ const SERVER_INSTRUCTIONS =
 	"they do changes what visitors currently see. `publish` is the one tool that does — call preview_url first " +
 	'to see the draft rendered as a real page, then `publish` when it looks right. `publish` and `unpublish` ' +
 	'require "publish" scope, a step up from "write"; if a call is rejected for insufficient scope, that is ' +
-	'this system working as intended, not a bug to route around.';
+	'this system working as intended, not a bug to route around. Two more tool groups exist outside that ' +
+	'content ladder: list_inquiries/get_inquiry/mark_inquiry_read read and manage contact-form submissions from ' +
+	'site visitors, gated behind a SEPARATE "inbox" scope — a token authorized only for content (even with ' +
+	'"publish") is refused here, by design, because inquiries contain real people\'s names/emails/messages. ' +
+	'query_analytics answers traffic questions ("how many views this week", "which project gets the most ' +
+	'views", "where does traffic come from") from aggregated, anonymous page-view data and only needs ordinary ' +
+	'"read" scope.';
 
 export interface DispatchResult {
 	/** Response body to send. null means "no body" (a notification: HTTP 202/204). */

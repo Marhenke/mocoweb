@@ -908,6 +908,16 @@ export const siteRoutes: RouteDefinition[] = [
 		]
 	},
 	{
+		pattern: '/api/contact',
+		label: 'Contact form submission',
+		description:
+			'POST-only endpoint behind the /contacto form (Lane B4): validates and stores a visitor inquiry in ' +
+			"Postgres, then best-effort emails the owner. Not a content-bearing page — it renders nothing and has " +
+			'no collection-backed regions (an empty `regions` array here is correct, not an omission).',
+		caching: 'dynamic',
+		regions: []
+	},
+	{
 		pattern: '/trabajos/{slug}',
 		label: 'Trabajos detail (single project)',
 		description:
@@ -962,6 +972,21 @@ export function isKnownRoutePath(pathname: string): boolean {
 		siteRoutes.some(
 			(route) => route.caching === 'static' && routePatternMatches(route.pattern, pathname)
 		) || generatedDiscoveryFiles.some((f) => f.pattern === pathname)
+	);
+}
+
+/**
+ * True if `pathname` is one of this site's declared STATIC PAGE routes
+ * (Lane B4, `analytics/record.ts`) — narrower than `isKnownRoutePath`,
+ * which also matches the generated discovery files (`/llms.txt`, etc.).
+ * Those aren't "pages" in the sense an owner's analytics question means
+ * ("which page gets the most views?") — a crawler fetching `/llms.txt`
+ * isn't a page view — so analytics recording checks this instead of
+ * `isKnownRoutePath` directly.
+ */
+export function isAnalyticsPagePath(pathname: string): boolean {
+	return siteRoutes.some(
+		(route) => route.caching === 'static' && routePatternMatches(route.pattern, pathname)
 	);
 }
 

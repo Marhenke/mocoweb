@@ -3,7 +3,8 @@ import type { Scope } from '../auth/scope';
 export interface ToolContext {
 	clientId: string;
 	clientName: string | null;
-	scope: Scope;
+	/** The caller's granted scope SET (e.g. "write" or "write inbox"), not a single Scope. */
+	scope: string;
 	/** This request's origin (e.g. "https://moco.example.com"), for tools that build absolute URLs (preview_url) or self-fetch to render a page (publish/unpublish's regeneration step). */
 	origin: string;
 }

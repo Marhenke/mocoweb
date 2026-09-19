@@ -173,15 +173,23 @@ export async function buildLlmsTxt(origin: string): Promise<string> {
 			'a hosted login provider, so render/open it rather than trying to complete it programmatically.'
 	);
 	lines.push('');
-	lines.push('SCOPES — three levels, each implying every level below it:');
+	lines.push(
+		'SCOPES — a granted authorization is a SET, not a single level: exactly one content level ' +
+			'(read/write/publish, each implying every level below it) plus, optionally, "inbox" — an ' +
+			'independent grant that does NOT come bundled with any content level, however high:'
+	);
 	for (const scope of SCOPES) {
 		lines.push(`  - ${scope}: ${SCOPE_DESCRIPTIONS[scope]}`);
 	}
 	lines.push(
 		'A write-scoped token can edit drafts all day without ever touching what a visitor sees: every write ' +
 			'tool only ever changes an entry\'s draft (`data`), never `published_data`. `publish`/`unpublish` are ' +
-			'the ONLY tools that move production, and both require "publish" scope — strictly above "write" — so ' +
-			'a write-scoped token calling them gets a 403 by design, not a bug to route around.'
+			'the ONLY tools that move production, and both require "publish" content scope — strictly above ' +
+			'"write" — so a write-scoped token calling them gets a 403 by design, not a bug to route around. ' +
+			'Separately, contact-form submissions (real visitors\' names/emails/messages) are gated behind ' +
+			'"inbox" specifically — a token with even "publish" content access is refused on inbox tools unless ' +
+			'"inbox" was granted too. Aggregate analytics (view counts) need no "inbox" grant — they identify ' +
+			'nobody, so plain "read" is enough.'
 	);
 	lines.push('');
 	lines.push('THE WORKING LOOP for a content change:');
@@ -369,8 +377,13 @@ function xmlEscape(value: string): string {
 }
 
 export async function buildSitemapXml(origin: string): Promise<string> {
+	// Lane B4: `caching === 'static'` also excludes an action endpoint like
+	// `/api/contact` (caching: 'dynamic', no `{slug}`) — a POST-only route
+	// with nothing to index is not a page a search engine should crawl, and
+	// without this filter it slipped into the sitemap as a bare `<url>` (a
+	// real bug caught while adding that route; see the Lane B4 report).
 	const staticPatterns = siteRoutes
-		.filter((r) => !r.pattern.includes('{slug}'))
+		.filter((r) => r.caching === 'static' && !r.pattern.includes('{slug}'))
 		.map((r) => r.pattern);
 
 	const projectRows = (await listEntryRows('projects')).filter((r) => r.publishedData !== null);

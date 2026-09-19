@@ -18,6 +18,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A7 | Tools MCP + descubrimiento (10 tools, 7/7 criterios) | ✅ verificada |
 | A8 | Borrador, publicación, regeneración estática | ✅ verificada |
 | A9 | Railway: provisioning, deploy, cutover | ✅ entorno preparado, sin deploy (ver `.migration/CUTOVER.md`) |
+| B4 | Formulario de contacto real, analítica propia, scope "inbox" | ✅ verificada (ver sección propia más abajo) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -221,3 +222,117 @@ Preservados tal cual; arreglarlos es una tarea de contenido, no de migración:
     comportamiento default sin necesidad de arriesgarlo contra el servicio en vivo. Las 8 variables
     de A9 se escribieron con `--skip-deploys`; el `deployment ID` y `createdAt` del servicio
     `mocoweb` se verificaron idénticos antes y después (`b4862cbe...`, 2026-09-15) — cero reinicio.
+
+## Lane B3: gate de navegación real, tras el incidente de `commit 463ae0f`
+
+El incidente: `hooks.server.ts` respondía una request de navegación cliente
+(`/estudio/__data.json`, normalizada por SvelteKit a `pathname === '/estudio'` +
+`isDataRequest === true`) con el HTML cacheado de la página en vez de JSON. La
+primera carga de cada página seguía andando (esa sí es una request HTML real);
+cualquier click posterior rompía. `verify.sh` (10 rutas), `resilience.sh` (6
+checks) y 150 requests manuales con `curl` durante el deploy dieron todos PASS
+mientras el sitio estaba completamente inutilizable — ninguno de esos checks
+hizo jamás la request que el router cliente realmente hace.
+
+23. **Todo check contra este sitio hasta ahora usaba `curl` contra rutas HTML.**
+    Se agregaron dos checks nuevos, cada uno cubriendo un lado distinto del
+    contrato roto:
+    - `verify.sh` ahora pide `<ruta>/__data.json` (o `/__data.json` para `/`)
+      para las 10 rutas y exige `Content-Type: application/json` + body
+      parseable — barato, sin browser, y habría bastado solo esto para
+      atrapar el incidente. La forma exacta de la URL se verificó contra la
+      versión instalada de SvelteKit (2.63) arrancando `node build` y
+      mirando la request real, no asumida de memoria.
+    - `.migration/browser-nav.sh` + `.migration/browser-nav.mjs` manejan un
+      Chrome real (`playwright-core`, sin binario de browser empaquetado —
+      ver el header de `browser-nav.sh` para el porqué) y hacen click de
+      verdad: home → Trabajos → una tarjeta de proyecto → atrás → Estudio,
+      fallando si algún paso cae en la página de error propia del sitio
+      (`+error.svelte`, detectado por su texto exacto) o loguea un error de
+      consola.
+    - **Demostrado, no afirmado**: sacando el guard `event.isDataRequest` de
+      `hooks.server.ts` (reintroduciendo el bug exacto del incidente), AMBOS
+      checks nuevos fallaron — `verify.sh` reportó las 10 rutas con
+      `Content-Type: text/html`, `browser-nav.sh` cayó en "Algo salió mal de
+      nuestro lado" con un `SyntaxError: Unexpected token '<'` en consola.
+      Restaurando el guard, ambos vuelven a PASS. El diff normalizado de
+      `verify.sh` (las 10 rutas HTML) siguió en PASS durante todo el
+      experimento — confirma que el nuevo check agrega cobertura real, no
+      ruido que ya venía fallando por otra razón.
+
+24. **La base de datos local había perdido la migración de medios de A5.**
+    `npm run db:seed` reseedea desde `scripts/source-content.ts`, que sigue
+    con los paths pre-migración (`/projects/racebox/portada.jpg`); algún lane
+    corrió `db:seed` sin volver a correr la migración de medios después.
+    `scripts/migrate-media.ts` (A5) no sirve para arreglarlo: su propio commit
+    borró los archivos de `static/` una vez subidos (defecto #21), así que en
+    este checkout encuentra "0 distinct referenced media files" — no porque no
+    haya nada que migrar, sino porque las fuentes ya no están en disco. Esto
+    no era solo un problema cosmético: con las imágenes rotas localmente, el
+    check de navegación en browser real (#23) reportaba 6 `404` de consola en
+    cada carga de página, indistinguibles a simple vista de un bug real —
+    exactamente el tipo de ruido que un gate no puede darse el lujo de tener.
+    Solución: `scripts/migrate-media-from-tag.ts`, igual que `migrate-media.ts`
+    pero leyendo bytes con `git show pre-cms:static/<path>` en vez de
+    `readFileSync` (mismo patrón que ya usa `generate-media-map.mjs`,
+    generalizado a las 39 entries seedeadas, no solo las 10 páginas de
+    baseline). Verificado: sobre la base local ya migrada, los 70 archivos
+    referenciados dieron `exists` (dedupe por contenido, cero bytes subidos de
+    más) y detectó los mismos 3 mismatches de `ratio` de `barbara-plesky` que
+    documenta el defecto #14 — ni un archivo de más, ni uno de menos.
+    `npm run setup:local` (`scripts/setup-local.sh`) encadena
+    `db:up` → migrate → seed → `migrate-media-from-tag` en un solo comando
+    documentado en el README, para que un checkout limpio (o un `db:seed`
+    corrido por error) siempre termine con medios funcionando.
+
+## Lane B4: formulario de contacto real, analítica propia, scope "inbox"
+
+Reemplaza el `mailto:` del formulario de contacto por un POST real
+(`/api/contact`) que valida y guarda la consulta en Postgres (tabla
+`inquiries`) ANTES de intentar notificar por email — el storage es la fuente
+de verdad, el email es solo la notificación, y un fallo del proveedor de
+email nunca pierde el mensaje ni rompe la respuesta de éxito al visitante.
+Agrega analítica de páginas vistas 100% propia (server-side, sin cookies, sin
+tercero) en `page_view_stats`, agregada por día/página/referrer/dispositivo
+(nunca una fila por visita). Agrega un scope OAuth "inbox", ortogonal a la
+escalera read/write/publish — un token de contenido, aunque tenga "publish",
+no puede leer las consultas del formulario. Ver el reporte de la lane para el
+detalle completo (proveedor de email elegido, diseño de la agregación,
+evidencia de los 8 criterios de aceptación).
+
+25. **`verify.sh` capturando rutas justo después de que el servidor bindea el
+    puerto puede leer contenido cacheado STALE de una request anterior**, no
+    necesariamente el HTML que el código fuente recién buildeado produciría.
+    `hooks.server.ts` sirve una ruta estática desde el cache de objetos
+    (`cache/store.ts`), y ese cache solo se repuebla en `publish`/`unpublish`
+    o en el warm sweep de arranque (`cache/warm.ts`) — un sweep que corre EN
+    BACKGROUND, sin bloquear que el proceso empiece a aceptar tráfico
+    (`verify.sh` espera a que `/` devuelva 200, no a que el warm sweep
+    termine). Se reprodujo así: un cambio de prueba al texto del botón de
+    `/contacto` no apareció en la captura de `verify.sh` corrida inmediatamente
+    después de un `node build` + arranque fresco — el request de captura ganó
+    la carrera contra el warm sweep de ESE arranque y leyó bytes cacheados de
+    un arranque anterior (que sí tenían el contenido correcto de la lane, solo
+    no el del cambio de prueba recién hecho). Repitiendo `verify.sh` una
+    segunda vez (con el cache ya asentado) sí reflejó el cambio. Esto no es un
+    bug de esta lane ni de B2/B3 — es una consecuencia inherente de "el warm
+    nunca bloquea el arranque" (la garantía correcta para servir tráfico real)
+    combinada con que `verify.sh` no tiene forma de saber cuándo terminó un
+    sweep que ni siquiera conoce. Implicación real: correr `verify.sh` a los
+    pocos segundos de un deploy fresco puede dar PASS leyendo contenido de
+    ANTES del deploy, no del deploy mismo — un falso PASS en el peor momento
+    posible. Ningún criterio de aceptación de esta lane pedía arreglar esto y
+    no se tocó `verify.sh` ni `warm.ts`; queda documentado para que un futuro
+    lane decida si vale la pena esperar `getWarmStatus().settled` antes de
+    capturar, o aceptar el trade-off tal cual está.
+
+26. **Re-baseline de `/contacto` en `.migration/baseline/contacto.html`** —
+    mismo mecanismo ya usado por B1 para las 10 rutas (nunca se edita la
+    LÓGICA de `verify.sh`, solo el archivo de referencia cuando el cambio es
+    deliberado): el formulario ahora incluye un campo honeypot oculto y una
+    clase `relative` en el contenedor, cambios reales e intencionales de esta
+    lane. Prueba FAIL→PASS de que el gate sigue vivo: con el honeypot
+    presente pero el botón de submit mutado a un texto distinto, `verify.sh`
+    marcó `/contacto` como diferente contra el nuevo baseline (una vez que el
+    cache ya estaba asentado, ver defecto #25); revertido el cambio, volvió a
+    PASS.

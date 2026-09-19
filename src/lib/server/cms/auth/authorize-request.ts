@@ -8,14 +8,15 @@
 
 import { getClient, type RegisteredClient } from './tokens';
 import { isSupportedChallengeMethod } from './pkce';
-import { parseScope, type Scope } from './scope';
+import { parseScope } from './scope';
 
 export interface ValidAuthorizeRequest {
 	client: RegisteredClient;
 	redirectUri: string;
 	state: string | null;
 	codeChallenge: string;
-	requestedScope: Scope;
+	/** The requested scope SET, normalized (e.g. "write" or "write inbox"). Not a single Scope. */
+	requestedScope: string;
 }
 
 export type AuthorizeValidationError = { error: string; description: string };

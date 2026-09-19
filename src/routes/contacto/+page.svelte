@@ -5,16 +5,45 @@
 	const { contactoHero, methods } = $derived(data);
 
 	let sent = $state(false);
+	let sending = $state(false);
 	let nombre = $state('');
 	let email = $state('');
 	let mensaje = $state('');
+	let website = $state(''); // honeypot — real visitors never see or fill this
+	let errorMessage = $state('');
+	let fallbackEmail = $state('');
 
-	function handleSubmit(e: Event) {
+	async function handleSubmit(e: Event) {
 		e.preventDefault();
-		const subject = encodeURIComponent(`Contacto web: ${nombre}`);
-		const body = encodeURIComponent(`Nombre: ${nombre}\nEmail: ${email}\n\nMensaje:\n${mensaje}`);
-		window.location.href = `mailto:mocoestudiocreativo@gmail.com?subject=${subject}&body=${body}`;
-		sent = true;
+		if (sending) return;
+		sending = true;
+		errorMessage = '';
+		fallbackEmail = '';
+
+		try {
+			const response = await fetch('/api/contact', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: nombre, email, message: mensaje, website })
+			});
+			const result = await response.json().catch(() => ({}));
+
+			if (response.ok && result.ok) {
+				sent = true;
+				return;
+			}
+
+			errorMessage =
+				result.message ??
+				'No pudimos enviar tu mensaje. Probá de nuevo en unos minutos o escribinos por email.';
+			if (result.fallbackEmail) fallbackEmail = result.fallbackEmail;
+		} catch {
+			errorMessage =
+				'No pudimos enviar tu mensaje — revisá tu conexión y probá de nuevo, o escribinos directamente.';
+			fallbackEmail = 'mocoestudiocreativo@gmail.com';
+		} finally {
+			sending = false;
+		}
 	}
 </script>
 
@@ -58,7 +87,7 @@
 		</div>
 
 		<!-- Columna derecha: formulario -->
-		<div class="rounded-3xl bg-ink p-7 text-cream sm:p-10">
+		<div class="relative rounded-3xl bg-ink p-7 text-cream sm:p-10">
 			{#if sent}
 				<div class="flex min-h-64 flex-col items-center justify-center text-center">
 					<span class="flex h-14 w-14 items-center justify-center rounded-full bg-lime text-2xl text-ink">✓</span>
@@ -67,6 +96,29 @@
 				</div>
 			{:else}
 				<form class="flex flex-col gap-5" onsubmit={handleSubmit}>
+					<!-- Honeypot: off-screen, unreachable by tab, hidden from screen readers — a real
+					     visitor never sees or fills this. A bot that fills every field it can find trips it. -->
+					<div class="absolute -left-[9999px] h-0 w-0 overflow-hidden" aria-hidden="true">
+						<label for="website">Dejá este campo vacío</label>
+						<input
+							id="website"
+							name="website"
+							type="text"
+							tabindex="-1"
+							autocomplete="off"
+							bind:value={website}
+						/>
+					</div>
+					{#if errorMessage}
+						<div class="rounded-xl border border-red-400/40 bg-red-400/10 px-4 py-3 text-sm text-cream">
+							<p>{errorMessage}</p>
+							{#if fallbackEmail}
+								<a href={`mailto:${fallbackEmail}`} class="mt-1 inline-block font-semibold underline">
+									{fallbackEmail}
+								</a>
+							{/if}
+						</div>
+					{/if}
 					<div class="flex flex-col gap-2">
 						<label for="nombre" class="text-sm font-semibold text-cream/80">Nombre</label>
 						<input
@@ -102,8 +154,9 @@
 					</div>
 					<button
 						type="submit"
-						class="mt-1 self-start rounded-full bg-lime px-6 py-3 text-sm font-semibold text-ink transition-all hover:bg-cream"
-					>Enviar mensaje</button>
+						disabled={sending}
+						class="mt-1 self-start rounded-full bg-lime px-6 py-3 text-sm font-semibold text-ink transition-all hover:bg-cream disabled:cursor-not-allowed disabled:opacity-60"
+					>{sending ? 'Enviando…' : 'Enviar mensaje'}</button>
 				</form>
 			{/if}
 		</div>

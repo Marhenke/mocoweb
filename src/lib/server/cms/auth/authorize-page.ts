@@ -6,7 +6,7 @@
  * rest of src/lib/server/cms/.
  */
 
-import { SCOPE_DESCRIPTIONS, type Scope } from './scope';
+import { SCOPE_DESCRIPTIONS, contentPartOf, hasInboxPart } from './scope';
 
 function escapeHtml(value: string): string {
 	return value
@@ -25,7 +25,8 @@ export interface AuthorizePageParams {
 	state: string | null;
 	codeChallenge: string;
 	codeChallengeMethod: string;
-	defaultScope: Scope;
+	/** The requested/previous scope SET (e.g. "write" or "write inbox"), not a single Scope. */
+	defaultScope: string;
 	errorMessage?: string;
 }
 
@@ -33,6 +34,8 @@ export function renderAuthorizePage(params: AuthorizePageParams): string {
 	const identity = params.clientName ? escapeHtml(params.clientName) : escapeHtml(params.clientId);
 	const hidden = (name: string, value: string) =>
 		`<input type="hidden" name="${name}" value="${escapeHtml(value)}">`;
+	const defaultContent = contentPartOf(params.defaultScope);
+	const defaultInbox = hasInboxPart(params.defaultScope);
 
 	return `<!doctype html>
 <html lang="en">
@@ -88,18 +91,26 @@ export function renderAuthorizePage(params: AuthorizePageParams): string {
 		<input type="password" id="owner_key" name="owner_key" autocomplete="off" autofocus required>
 
 		<fieldset>
-			<legend>Access level</legend>
+			<legend>Content access level</legend>
 			<label class="option">
-				<input type="radio" name="granted_scope" value="publish" ${params.defaultScope === 'publish' ? 'checked' : ''}>
+				<input type="radio" name="granted_scope" value="publish" ${defaultContent === 'publish' ? 'checked' : ''}>
 				${escapeHtml(SCOPE_DESCRIPTIONS.publish)}
 			</label>
 			<label class="option">
-				<input type="radio" name="granted_scope" value="write" ${params.defaultScope === 'write' ? 'checked' : ''}>
+				<input type="radio" name="granted_scope" value="write" ${defaultContent === 'write' ? 'checked' : ''}>
 				${escapeHtml(SCOPE_DESCRIPTIONS.write)}
 			</label>
 			<label class="option">
-				<input type="radio" name="granted_scope" value="read" ${params.defaultScope === 'read' ? 'checked' : ''}>
+				<input type="radio" name="granted_scope" value="read" ${defaultContent === 'read' ? 'checked' : ''}>
 				${escapeHtml(SCOPE_DESCRIPTIONS.read)}
+			</label>
+		</fieldset>
+
+		<fieldset>
+			<legend>Inbox access (separate grant)</legend>
+			<label class="option">
+				<input type="checkbox" name="granted_scope_inbox" value="inbox" ${defaultInbox ? 'checked' : ''}>
+				${escapeHtml(SCOPE_DESCRIPTIONS.inbox)}
 			</label>
 		</fieldset>
 
