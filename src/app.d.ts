@@ -2,7 +2,17 @@
 // for information about these interfaces
 declare global {
 	namespace App {
-		// interface Error {}
+		/**
+		 * Shape returned by `handleError` (`src/hooks.server.ts`) and read by
+		 * `src/routes/+error.svelte`. `message` is always safe to show a
+		 * visitor as-is (no stack traces, no internals — see `handleError`'s
+		 * doc comment); `errorId` is present only for an unexpected (5xx)
+		 * error and is what an operator matches against server logs.
+		 */
+		interface Error {
+			message: string;
+			errorId?: string;
+		}
 		interface Locals {
 			/**
 			 * True when this request carried a valid Lane A8 preview token

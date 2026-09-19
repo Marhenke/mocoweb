@@ -74,3 +74,45 @@ export function ensureMediaBucket(): Promise<void> {
 	}
 	return bucketReady;
 }
+
+/**
+ * Best-effort "is object storage reachable right now" check with a few
+ * quick retries, used by the health endpoint (`/api/health`) and the startup
+ * cache warm (Lane B2) — mirrors `pingDatabase` in `../db/client.ts`. A
+ * plain `HeadBucketCommand`, not `ensureMediaBucket()`: this must never
+ * create the bucket as a side effect of a health check, only report whether
+ * the S3-compatible endpoint answers at all.
+ *
+ * Each attempt carries its own `abortSignal` timeout (mirrors
+ * `pingDatabase`'s `attemptTimeoutMs` race) so a connection stuck mid-TCP
+ * (the endpoint's process is gone but the OS hasn't reported the socket as
+ * closed yet) can't make a health check hang past what a visitor-facing
+ * check is allowed to take — the AWS SDK's own default socket/connection
+ * timeouts are tuned for throughput, not for "answer in under a few
+ * seconds or say so."
+ */
+export async function pingStorage(
+	opts: { retries?: number; backoffMs?: number; attemptTimeoutMs?: number } = {}
+): Promise<boolean> {
+	const retries = opts.retries ?? 2;
+	const backoffMs = opts.backoffMs ?? 75;
+	const attemptTimeoutMs = opts.attemptTimeoutMs ?? 3000;
+	for (let attempt = 0; attempt <= retries; attempt++) {
+		try {
+			await s3.send(new HeadBucketCommand({ Bucket: MEDIA_BUCKET }), {
+				abortSignal: AbortSignal.timeout(attemptTimeoutMs)
+			});
+			return true;
+		} catch (err: unknown) {
+			// A 404 (bucket doesn't exist yet) still proves the endpoint itself
+			// is reachable and answering — that's what this check is for, not
+			// bucket existence (ensureMediaBucket already handles that lazily).
+			const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata
+				?.httpStatusCode;
+			if (status === 404) return true;
+			if (attempt === retries) return false;
+			await new Promise((resolve) => setTimeout(resolve, backoffMs * 2 ** attempt));
+		}
+	}
+	return false;
+}
