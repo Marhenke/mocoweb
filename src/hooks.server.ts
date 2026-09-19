@@ -134,6 +134,18 @@ export const handle: Handle = async ({ event, resolve }) => {
 		return response;
 	}
 
+	// SvelteKit normalises client-side navigation requests before this hook
+	// runs: a browser asking for `/estudio/__data.json` arrives here with
+	// `url.pathname === '/estudio'` and `isDataRequest === true`. Without this
+	// guard the cache answers those with the page's HTML, the client router
+	// fails to parse it as JSON, and every in-app navigation dies — while a
+	// hard page load still works, because that really is an HTML request.
+	// Sub-requests (server-side `fetch` during SSR) are excluded for the same
+	// reason: the cache only ever holds whole documents, never partial data.
+	if (event.isDataRequest || event.isSubRequest) {
+		return resolve(event);
+	}
+
 	if (isKnownRoutePath(event.url.pathname)) {
 		const cached = await safeGetCachedPage(event.url.pathname);
 		if (cached !== null) {
