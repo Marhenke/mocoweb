@@ -377,8 +377,13 @@ function xmlEscape(value: string): string {
 }
 
 export async function buildSitemapXml(origin: string): Promise<string> {
+	// Lane B4: `caching === 'static'` also excludes an action endpoint like
+	// `/api/contact` (caching: 'dynamic', no `{slug}`) — a POST-only route
+	// with nothing to index is not a page a search engine should crawl, and
+	// without this filter it slipped into the sitemap as a bare `<url>` (a
+	// real bug caught while adding that route; see the Lane B4 report).
 	const staticPatterns = siteRoutes
-		.filter((r) => !r.pattern.includes('{slug}'))
+		.filter((r) => r.caching === 'static' && !r.pattern.includes('{slug}'))
 		.map((r) => r.pattern);
 
 	const projectRows = (await listEntryRows('projects')).filter((r) => r.publishedData !== null);
