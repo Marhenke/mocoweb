@@ -131,6 +131,13 @@ done <<EOF
 $ROUTES
 EOF
 
+MEDIA_MAP="$SCRIPT_DIR/media-map.json"
+echo "==> Generating media URL map (pre-cms tag + baseline captures)..."
+if ! node "$SCRIPT_DIR/generate-media-map.mjs" >"$MEDIA_MAP"; then
+	echo "Failed to generate the media URL map -- see .migration/generate-media-map.mjs's output above."
+	exit 1
+fi
+
 echo "==> Normalizing and diffing..."
 rm -rf "$NORM_DIR"
 mkdir -p "$NORM_DIR/baseline" "$NORM_DIR/current"
@@ -173,13 +180,32 @@ mkdir -p "$NORM_DIR/baseline" "$NORM_DIR/current"
 #      "a\n\t\tb" are visually indistinguishable -- but a genuinely missing
 #      space ("ab" vs "a b") is a single space, never a run, so it still
 #      shows up as a difference after this rule.
+#   6. /media/<key> URLs (Lane A5 moved every image/video referenced by
+#      content out of static/ and into a bucket, served through that route)
+#      are TRANSLATED back to the original static/ path they came from --
+#      never blanked to a placeholder. A placeholder would make the gate
+#      blind to a swapped image: two different /media/<keyA> and
+#      /media/<keyB> would both collapse to the same placeholder and the
+#      diff would pass regardless of which file actually got served. Because
+#      the key is content-addressed (sha256 of the real bytes), translating
+#      it back is the stronger move: a correctly migrated file's key maps to
+#      exactly the path the pre-cms baseline had (byte-exact match
+#      preserved), while a swapped-in file hashes to a different key that
+#      maps to a different path (or nothing), so it still shows up as a real
+#      diff. The mapping itself is never hand-maintained -- see
+#      generate-media-map.mjs, run fresh below on every invocation -- and a
+#      key with no mapping entry is left as literal "/media/<key>" text by
+#      translate-media.mjs rather than guessed at, which still fails the
+#      comparison instead of silently passing.
 normalize() {
 	sed -E \
 		-e 's#([./]*_app/immutable/[A-Za-z0-9._/-]+)#/_app/immutable/__NORMALIZED__#g' \
 		-e 's/__sveltekit_[A-Za-z0-9]+/__sveltekit___NORMALIZED__/g' \
 		-e 's/translate\(-?[0-9]+\.[0-9]+px, ?-?[0-9]+\.[0-9]+px\)/translate(__NORMALIZED__)/g' \
 		-e 's/(data: )\[.*\],$/\1[__NORMALIZED_PAYLOAD__],/' \
-		"$1" | tr -s '[:space:]' ' '
+		"$1" \
+		| node "$SCRIPT_DIR/translate-media.mjs" "$MEDIA_MAP" \
+		| tr -s '[:space:]' ' '
 }
 
 ANY_DIFF=0
