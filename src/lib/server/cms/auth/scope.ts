@@ -20,6 +20,22 @@ export type Scope = 'read' | 'write' | 'publish';
 
 export const SCOPES: readonly Scope[] = ['read', 'write', 'publish'];
 
+/**
+ * One human-readable sentence per scope, describing exactly what it grants.
+ * The single source of truth for that description — both the /authorize
+ * page's radio-button labels (`authorize-page.ts`) and the generated agent
+ * discovery files (`src/lib/server/cms/discovery/`, Lane B1's llms.txt) read
+ * this instead of each hand-writing their own copy, so the two can never
+ * silently drift apart the way `content.schema.ts`'s collection registry
+ * warns against (see its "second source of truth" comment).
+ */
+export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
+	read: 'Read-only — this app can only view content.',
+	write: 'Read and write — this app can view and change draft content, but cannot publish it.',
+	publish:
+		'Read, write, and publish — this app can view, change, AND publish content to the live site.'
+};
+
 const RANK: Record<Scope, number> = { read: 0, write: 1, publish: 2 };
 
 export function isScope(value: unknown): value is Scope {

@@ -20,7 +20,13 @@ import { rpcError, rpcResult, JSON_RPC_ERROR_CODES, type JsonRpcRequest } from '
 
 export const PROTOCOL_VERSION = '2025-11-25';
 
-const SERVER_INFO = { name: 'mocoweb-cms', title: 'Moco CMS', version: '0.1.0' };
+/**
+ * Exported (not just module-local) so anything else that needs to name this
+ * server consistently — currently the Lane B1 discovery files' suggested MCP
+ * client display name — reads the same value `initialize` returns instead of
+ * hand-writing its own copy that can drift from it.
+ */
+export const SERVER_INFO = { name: 'mocoweb-cms', title: 'Moco CMS', version: '0.1.0' };
 
 const SERVER_INSTRUCTIONS =
 	'This MCP server operates a content-managed website with no admin panel — these tools are the only way to ' +

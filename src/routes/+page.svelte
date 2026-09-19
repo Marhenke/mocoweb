@@ -16,6 +16,10 @@
 		name="description"
 		content="Moco — Estudio creativo. Branding, diseño y desarrollo web con personalidad."
 	/>
+	<!-- Lane B1: one of several deliberately redundant MCP-discovery paths
+	     (see src/hooks.server.ts's Link header for the HTTP-header equivalent). -->
+	<link rel="mcp-server" href={data.mcpUrl} title="Moco CMS — MCP server (agent discovery)" />
+	{@html `<script type="application/ld+json">${data.organizationJsonLd}</script>`}
 </svelte:head>
 
 <Hero homeHero={data.homeHero} />

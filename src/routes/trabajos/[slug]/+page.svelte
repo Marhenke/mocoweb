@@ -30,6 +30,8 @@
 <svelte:head>
 	<title>{project.title} · Trabajos · Moco</title>
 	<meta name="description" content={project.summary} />
+	<!-- Lane B1: schema.org CreativeWork structured data for this project. -->
+	{@html `<script type="application/ld+json">${data.creativeWorkJsonLd}</script>`}
 </svelte:head>
 
 <!-- Encabezado del proyecto -->
