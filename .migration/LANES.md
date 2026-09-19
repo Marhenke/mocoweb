@@ -14,10 +14,10 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A3 | `content.schema.ts` + seed (13 colecciones, 39 entries) | ✅ reportada |
 | A4 | Read path: componentes leen de la base | ✅ **verificada** |
 | A5 | Media: bucket, `/media/*`, upload | ✅ verificada |
-| A6 | OAuth Authorization Server | ✅ reportada (verify.sh: FAIL heredado de A5, no nuevo — ver nota) |
-| A7 | Tools MCP + descubrimiento | pendiente |
+| A6 | OAuth Authorization Server (10/10 criterios) | ✅ verificada |
+| A7 | Tools MCP + descubrimiento (10 tools, 7/7 criterios) | ✅ verificada |
 | A8 | Borrador, publicación, regeneración estática | pendiente |
-| A9 | Railway: provisioning, deploy, cutover | pendiente — **bloqueada por `railway login`** |
+| A9 | Railway: provisioning, deploy, cutover | pendiente — login ✅ hecho, proyecto `mocoweb` ya existe |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -124,16 +124,45 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
     para agregar la regla de normalización que le faltó, o si el criterio de aceptación de gates
     futuros se redacta como "cero diffs *nuevos* respecto del estado heredado" en vez de "PASS".
 
-## Huecos de descubrimiento que quedan abiertos (para A7)
+## Huecos de descubrimiento (estado tras A7)
 
-El JSON Schema servido todavía no le dice a un agente:
-- que `slug` y `position` son parámetros aparte, fuera de `data`
-- ~~cómo obtener el `ratio` de un archivo~~ — resuelto en A5: `upload_media` (`src/lib/server/cms/media/upload.ts`)
-  lo mide del archivo real (sharp para imagen, ffprobe para video) y lo devuelve; un futuro tool MCP de
-  "subir media" debe llamarlo y usar el `ratio` que devuelve, nunca pedirle a un agente que lo estime.
-- cómo elegir el color `ink` de un proyecto mirando la portada
-- A7 también necesita saber que subir un archivo idéntico (mismo hash) es un no-op de storage (dedupe),
-  no un error — el schema no dice hoy qué significa que `upload_media` devuelva `deduped: true`.
+Los tres huecos originales, re-chequeados contra lo que las tools MCP devuelven de verdad
+(no contra lo que el brief de A7 asumía):
+
+- ~~que `slug` y `position` son parámetros aparte, fuera de `data`~~ — **cerrado.**
+  `describe_collection` devuelve una nota explícita: "`slug` y `position` son propiedades de la
+  ENTRY, no campos de `data`...". Verificado con el tool real (`describe_collection('projects')`).
+- ~~cómo obtener el `ratio` de un archivo~~ — resuelto en A5, reforzado en A7: `upload_media` lo
+  mide del archivo real y lo devuelve; la descripción del tool y las notas de `describe_collection`
+  repiten "nunca lo estimes". Probado con un PNG de 800×400 real → `ratio: 2` exacto.
+- cómo elegir el color `ink` de un proyecto mirando la portada — **sigue abierto.** Ninguna tool de
+  A7 deja que un agente "vea" el contenido visual de un archivo subido (no hay tool de
+  análisis/preview de imagen); el agente solo tiene la ruta del archivo y sus dimensiones. La
+  descripción del campo `ink` en el schema da la regla en prosa, pero aplicarla sigue exigiendo
+  juicio visual que ninguna tool aquí provee. Un futuro lane podría agregar un tool que devuelva,
+  por ejemplo, el color dominante/luminancia medida del archivo (con sharp, igual que `ratio`).
+- ~~qué significa que `upload_media` devuelva `deduped: true`~~ — **cerrado.** La descripción del
+  tool lo dice explícitamente ("this is a normal no-op, not an error").
+
+Huecos nuevos encontrados al construir A7 (no estaban en la lista original):
+
+- **`reorder_entries` no puede tocar una colección con algo publicado.** El schema de A2 tiene una
+  sola columna `position`, compartida entre el orden draft y el orden en vivo — no existe un
+  "orden de borrador" separado. Reordenar cambiaría inmediatamente el orden que ve el visitante,
+  lo cual A7 tiene prohibido. La tool lo verifica y se niega con un mensaje explícito si CUALQUIER
+  entry de la colección ya fue publicada; hoy eso significa que `reorder_entries` es inutilizable en
+  `projects` (las 6 entries de producción están publicadas) y solo funciona en una colección
+  todavía virgen. A8, o un cambio de schema, tendría que separar el orden de borrador del de
+  publicación (por ejemplo, dos columnas de posición) para que reordenar un catálogo ya publicado
+  sea posible sin tocar el sitio en vivo.
+- **`delete_entry` se niega si la entry tiene `published_data`**, por el mismo motivo (borrarla
+  borra también su snapshot publicado). Hoy no hay forma de sacar un proyecto publicado del sitio
+  vía MCP — ni con `delete_entry` ni con ninguna otra tool de A7 — hasta que A8 tenga
+  publish/unpublish/rollback.
+- **`create_entry` siempre agrega al final** (no acepta `position`), a propósito, para no poder
+  insertar nunca antes de una entry publicada. Combinado con los dos puntos anteriores: un agente
+  no tiene HOY ninguna forma de insertar un proyecto nuevo en el medio del listado publicado — solo
+  puede agregarlo al final. Es una limitación real de la superficie actual de A7, no un bug.
 
 ## Bugs de contenido preexistentes (NO tocar en la migración)
 

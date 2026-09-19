@@ -103,9 +103,9 @@ export const galleryCellSchema = z
 			.positive()
 			.describe(
 				'Width divided by height (e.g. a 1920×1080 image is 1.777, a 1080×1350 portrait photo is ' +
-					'0.8). This MUST be measured from the actual uploaded file\'s real pixel dimensions — never ' +
+					"0.8). This MUST be measured from the actual uploaded file's real pixel dimensions — never " +
 					'estimated, never copied from another cell that "looks similar." Every cell in a row is ' +
-					'forced to the same rendered height, and each cell\'s width is set proportional to its ' +
+					"forced to the same rendered height, and each cell's width is set proportional to its " +
 					'ratio (a flex-basis), so a wrong ratio does not just look slightly off — it stretches or ' +
 					'squashes that one image/video while its neighbors stay correct, which is immediately ' +
 					'visible. As a guide: landscape media in this gallery runs roughly 1.2–1.8, portrait media ' +
@@ -114,10 +114,12 @@ export const galleryCellSchema = z
 	})
 	.describe(
 		'One slot in a gallery row. Holds exactly one piece of media (image, video, or placeholder) and the ' +
-			'ratio that controls its share of the row\'s width.'
+			"ratio that controls its share of the row's width."
 	)
 	.superRefine((cell, ctx) => {
-		const mediaKindsSet = [cell.src, cell.video, cell.gradient].filter((v) => v !== undefined).length;
+		const mediaKindsSet = [cell.src, cell.video, cell.gradient].filter(
+			(v) => v !== undefined
+		).length;
 		if (mediaKindsSet !== 1) {
 			ctx.addIssue({
 				code: 'custom',
@@ -141,8 +143,8 @@ export const galleryRowSchema = z
 	.min(1)
 	.max(3)
 	.describe(
-		'One row of the gallery. Every cell in a row is rendered at the same height; each cell\'s rendered ' +
-			'width is its `ratio` divided by the sum of all ratios in the row, times the row\'s total width — ' +
+		"One row of the gallery. Every cell in a row is rendered at the same height; each cell's rendered " +
+			"width is its `ratio` divided by the sum of all ratios in the row, times the row's total width — " +
 			'so cells are never manually sized, only ratio-sized. Valid row shapes seen in production:\n' +
 			'  - 3 cells, all portrait (ratio ~0.55–0.85) — the most common gallery pattern, usually photo + ' +
 			'reel + photo.\n' +
@@ -164,7 +166,7 @@ export const galleryRowSchema = z
 						code: 'custom',
 						path: [i, 'ratio'],
 						message:
-							'A 3-cell row is a portrait triad in every production gallery today: each cell\'s ratio ' +
+							"A 3-cell row is a portrait triad in every production gallery today: each cell's ratio " +
 							'must be roughly 0.5–0.85 (portrait). This ratio falls outside that band — either the ' +
 							'ratio is wrong, or this cell does not belong in a 3-cell row.'
 					});
@@ -178,7 +180,7 @@ export type GalleryRowInput = z.infer<typeof galleryRowSchema>;
 export const gallerySchema = z
 	.array(galleryRowSchema)
 	.describe(
-		'The project\'s image/video gallery, as an ORDERED array of rows, rendered top to bottom in this ' +
+		"The project's image/video gallery, as an ORDERED array of rows, rendered top to bottom in this " +
 			'exact order. There is no separate "order" field — reordering the gallery means reordering this ' +
 			'array. See the row schema for what makes a valid row. Rows are commonly a mix of 3-portrait rows ' +
 			'and 2-landscape rows, occasionally broken up by a single full-bleed piece; there is no fixed count ' +
@@ -223,7 +225,7 @@ export const projectSchema = z
 			.string()
 			.min(1)
 			.describe(
-				'The project\'s display name, shown as the big heading on its detail page and on its card in ' +
+				"The project's display name, shown as the big heading on its detail page and on its card in " +
 					'the /trabajos grid. Usually the client\'s name or the campaign\'s name (e.g. "Racebox", ' +
 					'"REF × Summit de Empresas Familiares"). Keep it short enough to read at 5xl/8xl heading size ' +
 					'— under ~45 characters is safe.'
@@ -263,7 +265,7 @@ export const projectSchema = z
 					'for the two to use different phrasing for the same work.'
 			),
 		bg: mediaPath.describe(
-			'The background image used for this project\'s card on the /trabajos grid and home page preview. ' +
+			"The background image used for this project's card on the /trabajos grid and home page preview. " +
 				'Almost always the same file as `cover`. This field is REQUIRED even when `cover` is set, ' +
 				'because the grid card and the detail-page cover are rendered by different components that each ' +
 				'read their own field.'
@@ -271,26 +273,29 @@ export const projectSchema = z
 		cover: mediaPath
 			.optional()
 			.describe(
-				'The large cover image at the top of the project\'s detail page, above the fact sheet. If ' +
+				"The large cover image at the top of the project's detail page, above the fact sheet. If " +
 					'omitted, the detail page falls back to rendering `bg` as a plain color/background block ' +
 					'instead of a photo — so for a real photographic project, always set this explicitly rather ' +
 					'than relying on the fallback.'
 			),
 		ink: z
 			.string()
-			.regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/, 'Must be a hex color, e.g. "#f4f0e6".')
+			.regex(
+				/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/,
+				'Must be a hex color, e.g. "#f4f0e6".'
+			)
 			.describe(
 				'A hex color used as the text color drawn over `bg`/`cover` in places that show text on top of ' +
 					'the image (currently every project uses "#f4f0e6", the site\'s cream color, because every ' +
 					'cover photo is dark enough for light text — pick a darker ink color instead if a future ' +
-					'project\'s cover is a light/bright image).'
+					"project's cover is a light/bright image)."
 			),
 		summary: z
 			.string()
 			.min(1)
 			.describe(
 				'A one-to-two sentence overview of the project, shown directly under the title on the detail ' +
-					'page and used as that page\'s meta description for search engines/link previews. Should ' +
+					"page and used as that page's meta description for search engines/link previews. Should " +
 					'make sense completely out of context — it is often the only sentence a visitor reads before ' +
 					'deciding to click in from a search result or shared link.'
 			),
@@ -300,7 +305,7 @@ export const projectSchema = z
 			.describe(
 				'The "El desafío" (the challenge) paragraph on the detail page: what problem the client had ' +
 					'before Moco got involved. Written in first-person-plural/client voice, in Spanish, matching ' +
-					'the rest of the site\'s copy. One paragraph, no line breaks.'
+					"the rest of the site's copy. One paragraph, no line breaks."
 			),
 		solution: z
 			.string()
@@ -314,7 +319,7 @@ export const projectSchema = z
 	})
 	.describe(
 		'A single portfolio project, rendered at /trabajos/{entry-slug} and as a card on /trabajos and the ' +
-			'home page. The entry\'s slug (its identity in the CMS, not a field here) becomes that URL segment ' +
+			"home page. The entry's slug (its identity in the CMS, not a field here) becomes that URL segment " +
 			'— choose it URL-safe (lowercase, hyphenated) when creating a new project.'
 	);
 
@@ -330,14 +335,16 @@ export const valueSchema = z
 		title: z
 			.string()
 			.min(1)
-			.describe('A single word or very short phrase naming the value (e.g. "Explorar", "Claridad").'),
+			.describe(
+				'A single word or very short phrase naming the value (e.g. "Explorar", "Claridad").'
+			),
 		desc: z
 			.string()
 			.min(1)
 			.describe(
 				'A 1-2 sentence explanation of what that value means in practice for the studio. Written in ' +
 					'first-person-plural Spanish ("Nos gusta...", "Trabajamos..."), matching the rest of the ' +
-					'studio\'s voice.'
+					"studio's voice."
 			)
 	})
 	.describe(
@@ -353,13 +360,10 @@ export const processStepSchema = z
 			.min(1)
 			.describe(
 				'A single-word verb naming this step of the studio\'s process (e.g. "Escuchamos", "Creamos"), ' +
-					'shown next to a numbered badge (1, 2, 3…) that is generated automatically from this item\'s ' +
+					"shown next to a numbered badge (1, 2, 3…) that is generated automatically from this item's " +
 					'position — do not include the number in the text.'
 			),
-		desc: z
-			.string()
-			.min(1)
-			.describe('One sentence describing what happens during this step.')
+		desc: z.string().min(1).describe('One sentence describing what happens during this step.')
 	})
 	.describe(
 		'One step of the studio\'s work process, shown in order on the dark "Cómo trabajamos" band on ' +
@@ -383,7 +387,7 @@ export const homeServiceSchema = z
 			.regex(/^\d{2}$/, 'Two-digit, zero-padded index, e.g. "01".')
 			.describe(
 				'A two-digit index string ("01".."06") shown as a small label on the tile, purely decorative ' +
-					'numbering — it must be zero-padded to 2 digits and should match this item\'s position (1st ' +
+					"numbering — it must be zero-padded to 2 digits and should match this item's position (1st " +
 					'item is "01", 2nd is "02", etc.); it is not read or auto-generated, so update it if you ' +
 					'reorder items.'
 			),
@@ -440,12 +444,17 @@ export const teamMemberSchema = z
 		name: z
 			.string()
 			.min(1)
-			.describe('The person\'s first name (or preferred short name), shown as a heading under their photo.'),
+			.describe(
+				"The person's first name (or preferred short name), shown as a heading under their photo."
+			),
 		photo: mediaPath.describe(
 			'A photo of the person, cropped/displayed at a 4:5 (portrait) aspect ratio — pick or crop source ' +
 				'images with the subject roughly centered so an automatic 4:5 crop still looks intentional.'
 		),
-		role: z.string().min(1).describe('Their title/role, shown under their name (e.g. "Lic. en Diseño").'),
+		role: z
+			.string()
+			.min(1)
+			.describe('Their title/role, shown under their name (e.g. "Lic. en Diseño").'),
 		socials: z
 			.array(
 				z.object({
@@ -453,14 +462,14 @@ export const teamMemberSchema = z
 						.enum(['instagram', 'tiktok', 'youtube', 'spotify'])
 						.describe(
 							'Which platform this link is for. Limited to this exact set of four values because ' +
-								'each one maps to a hand-drawn icon in the site\'s icon component — a platform not in ' +
+								"each one maps to a hand-drawn icon in the site's icon component — a platform not in " +
 								'this list has no icon to render and will break the page, not just look wrong.'
 						),
-					href: externalUrl.describe('The full URL to that person\'s profile on the named platform.')
+					href: externalUrl.describe("The full URL to that person's profile on the named platform.")
 				})
 			)
 			.describe(
-				'This person\'s social links, shown as a row of small icon buttons under their role. Order is ' +
+				"This person's social links, shown as a row of small icon buttons under their role. Order is " +
 					'display order. Can be empty if they have none.'
 			)
 	})
@@ -479,17 +488,22 @@ export const contactMethodSchema = z
 		label: z
 			.string()
 			.min(1)
-			.describe('A short category label shown above the value, e.g. "Email", "Instagram", "Ubicación".'),
+			.describe(
+				'A short category label shown above the value, e.g. "Email", "Instagram", "Ubicación".'
+			),
 		value: z
 			.string()
 			.min(1)
 			.describe(
 				'The human-readable value shown to the visitor — the actual email address, @handle, or ' +
-					'location string. If `href` is set, this text becomes the link\'s visible label, so keep it ' +
-					'matching what `href` points to (don\'t show one address and link to another).'
+					"location string. If `href` is set, this text becomes the link's visible label, so keep it " +
+					"matching what `href` points to (don't show one address and link to another)."
 			),
 		href: z
-			.union([externalUrl, z.string().regex(/^mailto:/, 'Must be an external URL or a mailto: link.')])
+			.union([
+				externalUrl,
+				z.string().regex(/^mailto:/, 'Must be an external URL or a mailto: link.')
+			])
 			.nullable()
 			.describe(
 				'Where clicking this method\'s value takes the visitor: a "mailto:" link for an email address, ' +
@@ -536,7 +550,7 @@ export const homeHeroSchema = z
 					'headline (currently "pegajoso") — the visual punchline of the hero. Keep it short; the box ' +
 					'is sized to its text and a long phrase will wrap awkwardly.'
 			),
-		ctaLabel: z.string().min(1).describe('The text on the hero\'s call-to-action button.'),
+		ctaLabel: z.string().min(1).describe("The text on the hero's call-to-action button."),
 		ctaHref: z
 			.string()
 			.regex(/^\//, 'Must be a site-relative path.')
@@ -558,7 +572,9 @@ export const homeHeroSchema = z
 					'items make the marquee feel slow.'
 			)
 	})
-	.describe('The home page\'s hero section: the top-of-page video, headline, CTA, and the scrolling marquee below it.');
+	.describe(
+		"The home page's hero section: the top-of-page video, headline, CTA, and the scrolling marquee below it."
+	);
 
 export const statementSchema = z
 	.object({
@@ -572,11 +588,16 @@ export const statementSchema = z
 					'— just provide the sentence as plain text with normal spacing.'
 			)
 	})
-	.describe('The home page\'s lime full-width statement band, between the services grid and the portfolio preview.');
+	.describe(
+		"The home page's lime full-width statement band, between the services grid and the portfolio preview."
+	);
 
 export const estudioHeroSchema = z
 	.object({
-		eyebrow: z.string().min(1).describe('The small uppercase label above the headline (currently "El estudio").'),
+		eyebrow: z
+			.string()
+			.min(1)
+			.describe('The small uppercase label above the headline (currently "El estudio").'),
 		title: z
 			.string()
 			.min(1)
@@ -594,20 +615,30 @@ export const estudioHeroSchema = z
 
 export const contactoHeroSchema = z
 	.object({
-		eyebrow: z.string().min(1).describe('The small uppercase label above the headline (currently "Contacto").'),
-		title: z.string().min(1).describe('The main headline of the /contacto page, on the left column.'),
+		eyebrow: z
+			.string()
+			.min(1)
+			.describe('The small uppercase label above the headline (currently "Contacto").'),
+		title: z
+			.string()
+			.min(1)
+			.describe('The main headline of the /contacto page, on the left column.'),
 		intro: z.string().min(1).describe('The one-sentence intro paragraph under the headline.')
 	})
-	.describe('The left-column headline/intro on the dedicated /contacto page (distinct from the reusable `contactCta` band that appears on other pages).');
+	.describe(
+		'The left-column headline/intro on the dedicated /contacto page (distinct from the reusable `contactCta` band that appears on other pages).'
+	);
 
 export const pageHeaderSchema = z
 	.object({
 		eyebrow: z.string().min(1).describe('The small uppercase label above the title.'),
-		title: z.string().min(1).describe('The page\'s main heading.'),
+		title: z.string().min(1).describe("The page's main heading."),
 		intro: z
 			.string()
 			.optional()
-			.describe('An optional one-sentence intro paragraph under the title. Omit entirely if not needed.')
+			.describe(
+				'An optional one-sentence intro paragraph under the title. Omit entirely if not needed.'
+			)
 	})
 	.describe(
 		'A simple eyebrow/title/intro header, used by list-style pages (currently only /trabajos). Shared ' +
@@ -630,8 +661,13 @@ export const contactCtaSchema = z
 		email: z
 			.string()
 			.email()
-			.describe('The contact email address, shown as a pill-button whose link is generated as "mailto:" + this address.'),
-		instagramLabel: z.string().min(1).describe('The label on the Instagram pill-button (currently "Instagram").'),
+			.describe(
+				'The contact email address, shown as a pill-button whose link is generated as "mailto:" + this address.'
+			),
+		instagramLabel: z
+			.string()
+			.min(1)
+			.describe('The label on the Instagram pill-button (currently "Instagram").'),
 		instagramHref: externalUrl.describe('The full URL the Instagram button links to.')
 	})
 	.describe(
@@ -652,18 +688,221 @@ export interface CollectionDefinition {
 	schema: z.ZodType;
 }
 
+// ---------------------------------------------------------------------------
+// Route map — what page renders which collection, in which region
+// ---------------------------------------------------------------------------
+//
+// WHO READS THIS: `get_site_map` (the MCP discovery tool, Lane A7). An agent
+// that has never seen this site arrives with a URL and a token and nothing
+// else — it needs to go from "the homepage" or "the typo is on /estudio" to
+// the actual collection holding that text, without a human explaining the
+// site's structure. A flat list of the 13 collection keys above does not
+// get it there; this does. Keep it declarative and hand-written here, next
+// to the schemas it references, so the engine (the MCP tool implementation)
+// stays generic and only this file is Moco-specific.
+//
+// This is intentionally a second source of truth about which collections
+// exist (alongside `collectionDefinitions`) — every `collection` referenced
+// below MUST be a real key in `collectionDefinitions`; nothing enforces that
+// at the type level, so double-check by hand when adding a route or a
+// collection.
+
+export interface RouteRegion {
+	/** A short, page-local name for this slot (not a CSS selector or DOM id). */
+	region: string;
+	/** The collection key (see `collectionDefinitions`) governing this region's content. */
+	collection: string;
+	/** What this region is and anything not obvious from the collection's own schema. */
+	note: string;
+}
+
+export interface RouteDefinition {
+	/** The route's URL pattern. A literal path, or one with a `{param}` segment for dynamic routes. */
+	pattern: string;
+	label: string;
+	description: string;
+	regions: RouteRegion[];
+}
+
+export const siteRoutes: RouteDefinition[] = [
+	{
+		pattern: '/',
+		label: 'Home',
+		description:
+			'The landing page: video hero, services teaser, a lime statement band, a portfolio preview, and a shared contact CTA.',
+		regions: [
+			{
+				region: 'hero',
+				collection: 'homeHero',
+				note: 'Top-of-page video hero: headline, CTA button, marquee strip.'
+			},
+			{
+				region: 'statement',
+				collection: 'statement',
+				note: 'The full-width lime band between the services grid and the portfolio preview.'
+			},
+			{
+				region: 'services',
+				collection: 'homeServices',
+				note: 'The "¿Qué necesitás?" tile grid. Shares the same six services as /estudio\'s services accordion (collection `estudioServices`) but with independently-written, shorter copy — editing one does not change the other.'
+			},
+			{
+				region: 'portfolioPreview',
+				collection: 'projects',
+				note: 'Shows every published project as a preview card, in entry-position order. Same `projects` collection that backs /trabajos and /trabajos/{slug} — there is only one list of projects, previewed in three places.'
+			},
+			{
+				region: 'contactCta',
+				collection: 'contactCta',
+				note: 'The reusable lime "get in touch" band. Also appears on /estudio and /trabajos — one shared singleton entry, editing it changes all three pages at once.'
+			}
+		]
+	},
+	{
+		pattern: '/estudio',
+		label: 'Estudio (studio/about)',
+		description:
+			"The studio's about page: hero, values grid, services accordion, process steps, team grid, shared contact CTA.",
+		regions: [
+			{
+				region: 'hero',
+				collection: 'estudioHero',
+				note: 'Dark full-bleed hero at the top of the page.'
+			},
+			{
+				region: 'values',
+				collection: 'values',
+				note: 'The "En qué creemos" card grid, in entry-position order.'
+			},
+			{
+				region: 'services',
+				collection: 'estudioServices',
+				note: 'The "Nuestros servicios" accordion — the fuller, longer-form counterpart to the home page\'s `homeServices` tiles for the same six services.'
+			},
+			{
+				region: 'process',
+				collection: 'process',
+				note: 'The "Cómo trabajamos" numbered steps, in entry-position order (order is meaningful — it tells a sequence, listen → explore → create → deliver).'
+			},
+			{
+				region: 'team',
+				collection: 'team',
+				note: 'The "Quiénes somos" people grid, in entry-position order.'
+			},
+			{
+				region: 'contactCta',
+				collection: 'contactCta',
+				note: "Same shared singleton as the home page's contactCta region — editing it changes both pages."
+			}
+		]
+	},
+	{
+		pattern: '/contacto',
+		label: 'Contacto',
+		description:
+			'The dedicated contact page: its own headline/intro plus a list of contact methods. Distinct from the shared `contactCta` band that appears elsewhere.',
+		regions: [
+			{
+				region: 'hero',
+				collection: 'contactoHero',
+				note: 'Left-column headline/intro, specific to this page — NOT the same content as the `contactCta` singleton used elsewhere.'
+			},
+			{
+				region: 'methods',
+				collection: 'contactMethods',
+				note: 'The "how to reach us" list (Email, Instagram, Ubicación, …), in entry-position order.'
+			}
+		]
+	},
+	{
+		pattern: '/trabajos',
+		label: 'Trabajos (portfolio index)',
+		description:
+			'The portfolio listing page: a header, the full project grid, and the shared contact CTA.',
+		regions: [
+			{
+				region: 'header',
+				collection: 'trabajosHeader',
+				note: 'Eyebrow/title/intro header at the top of the page.'
+			},
+			{
+				region: 'grid',
+				collection: 'projects',
+				note: 'Every published project as a card, in entry-position order. Same `projects` collection as the home page preview and /trabajos/{slug}.'
+			},
+			{
+				region: 'contactCta',
+				collection: 'contactCta',
+				note: 'Same shared singleton used on / and /estudio.'
+			}
+		]
+	},
+	{
+		pattern: '/trabajos/{slug}',
+		label: 'Trabajos detail (single project)',
+		description:
+			'A single project\'s case-study page, addressed by its entry slug. Also renders a "next project" link, computed as the following project by entry position (wrapping to the first after the last).',
+		regions: [
+			{
+				region: 'project',
+				collection: 'projects',
+				note: "The `projects` entry whose slug equals the URL's {slug} segment. This is a `list` collection: use list_entries or get_entry with that slug — there is no separate per-route collection for this page."
+			}
+		]
+	}
+];
+
 export const collectionDefinitions: CollectionDefinition[] = [
 	{ key: 'projects', kind: 'list', label: 'Proyectos', schema: projectSchema },
 	{ key: 'values', kind: 'list', label: 'Valores (Estudio)', schema: valueSchema },
 	{ key: 'process', kind: 'list', label: 'Proceso (Estudio)', schema: processStepSchema },
 	{ key: 'homeServices', kind: 'list', label: 'Servicios (Home)', schema: homeServiceSchema },
-	{ key: 'estudioServices', kind: 'list', label: 'Servicios (Estudio)', schema: estudioServiceSchema },
+	{
+		key: 'estudioServices',
+		kind: 'list',
+		label: 'Servicios (Estudio)',
+		schema: estudioServiceSchema
+	},
 	{ key: 'team', kind: 'list', label: 'Equipo', schema: teamMemberSchema },
-	{ key: 'contactMethods', kind: 'list', label: 'Métodos de contacto', schema: contactMethodSchema },
+	{
+		key: 'contactMethods',
+		kind: 'list',
+		label: 'Métodos de contacto',
+		schema: contactMethodSchema
+	},
 	{ key: 'homeHero', kind: 'singleton', label: 'Hero (Home)', schema: homeHeroSchema },
 	{ key: 'statement', kind: 'singleton', label: 'Statement (Home)', schema: statementSchema },
 	{ key: 'estudioHero', kind: 'singleton', label: 'Hero (Estudio)', schema: estudioHeroSchema },
 	{ key: 'contactoHero', kind: 'singleton', label: 'Hero (Contacto)', schema: contactoHeroSchema },
-	{ key: 'trabajosHeader', kind: 'singleton', label: 'Encabezado (Trabajos)', schema: pageHeaderSchema },
-	{ key: 'contactCta', kind: 'singleton', label: 'CTA de contacto (compartido)', schema: contactCtaSchema }
+	{
+		key: 'trabajosHeader',
+		kind: 'singleton',
+		label: 'Encabezado (Trabajos)',
+		schema: pageHeaderSchema
+	},
+	{
+		key: 'contactCta',
+		kind: 'singleton',
+		label: 'CTA de contacto (compartido)',
+		schema: contactCtaSchema
+	}
 ];
+
+// A route referencing a collection key that doesn't exist would silently
+// blind get_site_map's discovery of a real region rather than error loudly —
+// exactly the "second source of truth desyncs" failure mode documented in
+// .migration/LANES.md (defect #4, about an out-of-band count drifting from
+// the list it was supposed to describe). Fail fast at module load instead.
+{
+	const knownKeys = new Set(collectionDefinitions.map((c) => c.key));
+	for (const route of siteRoutes) {
+		for (const region of route.regions) {
+			if (!knownKeys.has(region.collection)) {
+				throw new Error(
+					`content.schema.ts: route "${route.pattern}" region "${region.region}" references unknown ` +
+						`collection "${region.collection}" — it is not in collectionDefinitions.`
+				);
+			}
+		}
+	}
+}
