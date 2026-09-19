@@ -221,3 +221,65 @@ Preservados tal cual; arreglarlos es una tarea de contenido, no de migración:
     comportamiento default sin necesidad de arriesgarlo contra el servicio en vivo. Las 8 variables
     de A9 se escribieron con `--skip-deploys`; el `deployment ID` y `createdAt` del servicio
     `mocoweb` se verificaron idénticos antes y después (`b4862cbe...`, 2026-09-15) — cero reinicio.
+
+## Lane B3: gate de navegación real, tras el incidente de `commit 463ae0f`
+
+El incidente: `hooks.server.ts` respondía una request de navegación cliente
+(`/estudio/__data.json`, normalizada por SvelteKit a `pathname === '/estudio'` +
+`isDataRequest === true`) con el HTML cacheado de la página en vez de JSON. La
+primera carga de cada página seguía andando (esa sí es una request HTML real);
+cualquier click posterior rompía. `verify.sh` (10 rutas), `resilience.sh` (6
+checks) y 150 requests manuales con `curl` durante el deploy dieron todos PASS
+mientras el sitio estaba completamente inutilizable — ninguno de esos checks
+hizo jamás la request que el router cliente realmente hace.
+
+23. **Todo check contra este sitio hasta ahora usaba `curl` contra rutas HTML.**
+    Se agregaron dos checks nuevos, cada uno cubriendo un lado distinto del
+    contrato roto:
+    - `verify.sh` ahora pide `<ruta>/__data.json` (o `/__data.json` para `/`)
+      para las 10 rutas y exige `Content-Type: application/json` + body
+      parseable — barato, sin browser, y habría bastado solo esto para
+      atrapar el incidente. La forma exacta de la URL se verificó contra la
+      versión instalada de SvelteKit (2.63) arrancando `node build` y
+      mirando la request real, no asumida de memoria.
+    - `.migration/browser-nav.sh` + `.migration/browser-nav.mjs` manejan un
+      Chrome real (`playwright-core`, sin binario de browser empaquetado —
+      ver el header de `browser-nav.sh` para el porqué) y hacen click de
+      verdad: home → Trabajos → una tarjeta de proyecto → atrás → Estudio,
+      fallando si algún paso cae en la página de error propia del sitio
+      (`+error.svelte`, detectado por su texto exacto) o loguea un error de
+      consola.
+    - **Demostrado, no afirmado**: sacando el guard `event.isDataRequest` de
+      `hooks.server.ts` (reintroduciendo el bug exacto del incidente), AMBOS
+      checks nuevos fallaron — `verify.sh` reportó las 10 rutas con
+      `Content-Type: text/html`, `browser-nav.sh` cayó en "Algo salió mal de
+      nuestro lado" con un `SyntaxError: Unexpected token '<'` en consola.
+      Restaurando el guard, ambos vuelven a PASS. El diff normalizado de
+      `verify.sh` (las 10 rutas HTML) siguió en PASS durante todo el
+      experimento — confirma que el nuevo check agrega cobertura real, no
+      ruido que ya venía fallando por otra razón.
+
+24. **La base de datos local había perdido la migración de medios de A5.**
+    `npm run db:seed` reseedea desde `scripts/source-content.ts`, que sigue
+    con los paths pre-migración (`/projects/racebox/portada.jpg`); algún lane
+    corrió `db:seed` sin volver a correr la migración de medios después.
+    `scripts/migrate-media.ts` (A5) no sirve para arreglarlo: su propio commit
+    borró los archivos de `static/` una vez subidos (defecto #21), así que en
+    este checkout encuentra "0 distinct referenced media files" — no porque no
+    haya nada que migrar, sino porque las fuentes ya no están en disco. Esto
+    no era solo un problema cosmético: con las imágenes rotas localmente, el
+    check de navegación en browser real (#23) reportaba 6 `404` de consola en
+    cada carga de página, indistinguibles a simple vista de un bug real —
+    exactamente el tipo de ruido que un gate no puede darse el lujo de tener.
+    Solución: `scripts/migrate-media-from-tag.ts`, igual que `migrate-media.ts`
+    pero leyendo bytes con `git show pre-cms:static/<path>` en vez de
+    `readFileSync` (mismo patrón que ya usa `generate-media-map.mjs`,
+    generalizado a las 39 entries seedeadas, no solo las 10 páginas de
+    baseline). Verificado: sobre la base local ya migrada, los 70 archivos
+    referenciados dieron `exists` (dedupe por contenido, cero bytes subidos de
+    más) y detectó los mismos 3 mismatches de `ratio` de `barbara-plesky` que
+    documenta el defecto #14 — ni un archivo de más, ni uno de menos.
+    `npm run setup:local` (`scripts/setup-local.sh`) encadena
+    `db:up` → migrate → seed → `migrate-media-from-tag` en un solo comando
+    documentado en el README, para que un checkout limpio (o un `db:seed`
+    corrido por error) siempre termine con medios funcionando.

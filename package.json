@@ -22,7 +22,9 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node scripts/migrate.ts",
 		"db:seed": "node scripts/seed.ts",
-		"db:verify-roundtrip": "node scripts/verify-roundtrip.ts"
+		"db:verify-roundtrip": "node scripts/verify-roundtrip.ts",
+		"db:migrate-media": "node scripts/migrate-media-from-tag.ts",
+		"setup:local": "bash scripts/setup-local.sh"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-node": "^5.5.4",
@@ -32,6 +34,7 @@
 		"@tailwindcss/vite": "^4.3.0",
 		"dotenv": "^18.0.0",
 		"drizzle-kit": "^0.31.10",
+		"playwright-core": "^1.63.0",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^4.1.0",
 		"prettier-plugin-tailwindcss": "^0.8.0",
