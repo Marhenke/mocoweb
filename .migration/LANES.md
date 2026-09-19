@@ -14,7 +14,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A3 | `content.schema.ts` + seed (13 colecciones, 39 entries) | ✅ reportada |
 | A4 | Read path: componentes leen de la base | ✅ **verificada** |
 | A5 | Media: bucket, `/media/*`, upload | ✅ verificada |
-| A6 | OAuth Authorization Server | pendiente |
+| A6 | OAuth Authorization Server | ✅ reportada (verify.sh: FAIL heredado de A5, no nuevo — ver nota) |
 | A7 | Tools MCP + descubrimiento | pendiente |
 | A8 | Borrador, publicación, regeneración estática | pendiente |
 | A9 | Railway: provisioning, deploy, cutover | pendiente — **bloqueada por `railway login`** |
@@ -109,6 +109,20 @@ Estos alimentan la skill. Cada uno salió de un agente trabado o de una revisió
     independiente: mutar `projects.racebox.title` hizo fallar **3** rutas — `/trabajos`,
     `/trabajos/racebox` y `/trabajos/sergio-castiglione`, esta última porque muestra "Siguiente
     proyecto → Racebox". El gate detecta propagación transitiva, no solo cambios directos.
+
+18. **`verify.sh` ya estaba en FAIL antes de que A6 tocara una sola línea**, y el brief de A6 asumía
+    que reportaba PASS. A5 dejó documentado en su propio commit (`git log 0c521f9`) que las 9 rutas
+    con media fallan porque las URLs pasaron de `/projects/...` a `/media/<hash>` — un cambio
+    arquitectónico esperado, con prueba compensatoria (hash byte-a-byte, conteo de referencias,
+    resolución 200 de las 70 URLs) en vez de diff exacto — pero a diferencia de A4 (que sí agregó una
+    regla de normalización para su propio cambio arquitectónico, el payload de hidratación), A5 nunca
+    actualizó `normalize()` para las URLs de media, así que el gate quedó en FAIL permanente para
+    cualquier lane siguiente. A6 lo verificó por aislamiento: moviendo todos sus archivos nuevos fuera
+    del árbol y volviendo a correr `verify.sh`, el resultado es **idéntico** (mismas 9 rutas, mismo
+    diff de 6 líneas en `/estudio`, `/contacto` sigue pasando) — cero relación con A6. No se tocó
+    `verify.sh` (regla explícita del brief); queda para que el orquestador decida si A5 se re-abre
+    para agregar la regla de normalización que le faltó, o si el criterio de aceptación de gates
+    futuros se redacta como "cero diffs *nuevos* respecto del estado heredado" en vez de "PASS".
 
 ## Huecos de descubrimiento que quedan abiertos (para A7)
 
