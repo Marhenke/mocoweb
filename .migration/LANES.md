@@ -17,7 +17,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A6 | OAuth Authorization Server (10/10 criterios) | ✅ verificada |
 | A7 | Tools MCP + descubrimiento (10 tools, 7/7 criterios) | ✅ verificada |
 | A8 | Borrador, publicación, regeneración estática | ✅ verificada |
-| A9 | Railway: provisioning, deploy, cutover | pendiente — login ✅ hecho, proyecto `mocoweb` ya existe |
+| A9 | Railway: provisioning, deploy, cutover | ✅ entorno preparado, sin deploy (ver `.migration/CUTOVER.md`) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -178,3 +178,46 @@ Preservados tal cual; arreglarlos es una tarea de contenido, no de migración:
 - `static/projects/barbara-plesky/placa.jpg`, `static/projects/ref-summit/img-6.jpg` y
   `static/projects/ref-summit/portada.jpg` son archivos huérfanos (ningún `entries.data` los
   referencia) — quedaron en el repo, no se migraron a medios ni se borraron.
+
+## Defectos encontrados en A9 (Railway)
+
+19. **El brief de A9 volvió a decir "8 tablas"** — el mismo número que el defecto #4 ya marcó
+    como falso en A2 (el contrato define 7). Recontado contra un Postgres de Railway genuinemente
+    nuevo, recién migrado: 7 tablas (`collections`, `entries`, `media`, `oauth_clients`,
+    `oauth_auth_codes`, `oauth_refresh_tokens`, `revisions`), no 8. El número correcto ya estaba
+    documentado en este mismo archivo; el brief lo pisó igual. Señal de que "8 tablas" necesita
+    borrarse de donde sea que un futuro brief lo copia, no solo corregirse otra vez acá.
+
+20. **`railway config migrate` no puede producir una conversión fiel para este servicio, y no es un
+    problema de ejecución sino de lo que el DSL declarativo (`railway/iac`) soporta hoy.** La
+    referencia pública (`docs.railway.com/infrastructure-as-code/reference`) no menciona en ningún
+    lado `restartPolicyType`/`restartPolicyMaxRetries` ni una forma de fijar el builder
+    (NIXPACKS vs RAILPACK) — no es que falte documentar, el propio `railway config migrate`
+    (dry-run) genera un archivo que omite por completo la política de reinicio
+    (`ON_FAILURE`, 10 reintentos) y deja el builder como comentario, no como config real. Peor:
+    `railway config pull --json` muestra que el builder "de base" que Railway tiene guardado para
+    este service es **RAILPACK**, distinto del NIXPACKS que `railway.json` fija hoy — aplicar la
+    migración (que además "clears Railway Config File settings", desconectando `railway.json`)
+    arriesgaba cambiar builder y política de reinicio del servicio en vivo sin que hubiera forma de
+    expresar lo contrario en el archivo generado. Se corrió el `migrate` en dry-run nomás (no se
+    tocaron los config settings del servicio); la migración de formato queda pendiente hasta que el
+    DSL soporte estos dos campos o el dueño acepte el cambio de comportamiento a sabiendas. El plazo
+    real (2026-12-01) da margen.
+
+21. **`scripts/migrate-media.ts` (A5) no es reusable tal cual contra un ambiente nuevo.** Su propio
+    commit (`0c521f9`) borró los archivos de `static/` una vez subidos al bucket local, así que en
+    un checkout nuevo (o un ambiente de producción nunca antes poblado) no quedan bytes que ese
+    script pueda leer — encuentra "0 distinct referenced media files" no porque no haya nada que
+    migrar sino porque las fuentes ya no existen en disco. La fuente durable es el tag `pre-cms`
+    (`git show pre-cms:static/<path>`, el mismo truco que ya usa
+    `.migration/generate-media-map.mjs`, generalizado a las 39 entries reales en vez de solo las 10
+    páginas del baseline). A9 escribió un script ad-hoc para esto; si un futuro ambiente necesita
+    re-poblar medios desde cero, este es el patrón a seguir, no `migrate-media.ts` de A5 sin
+    modificar.
+
+22. **Cambiar variables de un servicio Railway sí reinicia el deploy activo por default** — no es
+    solo una posibilidad teórica que el brief pedía "confirmar": `railway variable --help` documenta
+    la flag `--skip-deploys` explícitamente para evitar ese reinicio, lo que confirma el
+    comportamiento default sin necesidad de arriesgarlo contra el servicio en vivo. Las 8 variables
+    de A9 se escribieron con `--skip-deploys`; el `deployment ID` y `createdAt` del servicio
+    `mocoweb` se verificaron idénticos antes y después (`b4862cbe...`, 2026-09-15) — cero reinicio.
