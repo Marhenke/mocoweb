@@ -18,6 +18,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A7 | Tools MCP + descubrimiento (10 tools, 7/7 criterios) | ✅ verificada |
 | A8 | Borrador, publicación, regeneración estática | ✅ verificada |
 | A9 | Railway: provisioning, deploy, cutover | ✅ entorno preparado, sin deploy (ver `.migration/CUTOVER.md`) |
+| B4 | Formulario de contacto real, analítica propia, scope "inbox" | ✅ verificada (ver sección propia más abajo) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -283,3 +284,55 @@ hizo jamás la request que el router cliente realmente hace.
     `db:up` → migrate → seed → `migrate-media-from-tag` en un solo comando
     documentado en el README, para que un checkout limpio (o un `db:seed`
     corrido por error) siempre termine con medios funcionando.
+
+## Lane B4: formulario de contacto real, analítica propia, scope "inbox"
+
+Reemplaza el `mailto:` del formulario de contacto por un POST real
+(`/api/contact`) que valida y guarda la consulta en Postgres (tabla
+`inquiries`) ANTES de intentar notificar por email — el storage es la fuente
+de verdad, el email es solo la notificación, y un fallo del proveedor de
+email nunca pierde el mensaje ni rompe la respuesta de éxito al visitante.
+Agrega analítica de páginas vistas 100% propia (server-side, sin cookies, sin
+tercero) en `page_view_stats`, agregada por día/página/referrer/dispositivo
+(nunca una fila por visita). Agrega un scope OAuth "inbox", ortogonal a la
+escalera read/write/publish — un token de contenido, aunque tenga "publish",
+no puede leer las consultas del formulario. Ver el reporte de la lane para el
+detalle completo (proveedor de email elegido, diseño de la agregación,
+evidencia de los 8 criterios de aceptación).
+
+25. **`verify.sh` capturando rutas justo después de que el servidor bindea el
+    puerto puede leer contenido cacheado STALE de una request anterior**, no
+    necesariamente el HTML que el código fuente recién buildeado produciría.
+    `hooks.server.ts` sirve una ruta estática desde el cache de objetos
+    (`cache/store.ts`), y ese cache solo se repuebla en `publish`/`unpublish`
+    o en el warm sweep de arranque (`cache/warm.ts`) — un sweep que corre EN
+    BACKGROUND, sin bloquear que el proceso empiece a aceptar tráfico
+    (`verify.sh` espera a que `/` devuelva 200, no a que el warm sweep
+    termine). Se reprodujo así: un cambio de prueba al texto del botón de
+    `/contacto` no apareció en la captura de `verify.sh` corrida inmediatamente
+    después de un `node build` + arranque fresco — el request de captura ganó
+    la carrera contra el warm sweep de ESE arranque y leyó bytes cacheados de
+    un arranque anterior (que sí tenían el contenido correcto de la lane, solo
+    no el del cambio de prueba recién hecho). Repitiendo `verify.sh` una
+    segunda vez (con el cache ya asentado) sí reflejó el cambio. Esto no es un
+    bug de esta lane ni de B2/B3 — es una consecuencia inherente de "el warm
+    nunca bloquea el arranque" (la garantía correcta para servir tráfico real)
+    combinada con que `verify.sh` no tiene forma de saber cuándo terminó un
+    sweep que ni siquiera conoce. Implicación real: correr `verify.sh` a los
+    pocos segundos de un deploy fresco puede dar PASS leyendo contenido de
+    ANTES del deploy, no del deploy mismo — un falso PASS en el peor momento
+    posible. Ningún criterio de aceptación de esta lane pedía arreglar esto y
+    no se tocó `verify.sh` ni `warm.ts`; queda documentado para que un futuro
+    lane decida si vale la pena esperar `getWarmStatus().settled` antes de
+    capturar, o aceptar el trade-off tal cual está.
+
+26. **Re-baseline de `/contacto` en `.migration/baseline/contacto.html`** —
+    mismo mecanismo ya usado por B1 para las 10 rutas (nunca se edita la
+    LÓGICA de `verify.sh`, solo el archivo de referencia cuando el cambio es
+    deliberado): el formulario ahora incluye un campo honeypot oculto y una
+    clase `relative` en el contenedor, cambios reales e intencionales de esta
+    lane. Prueba FAIL→PASS de que el gate sigue vivo: con el honeypot
+    presente pero el botón de submit mutado a un texto distinto, `verify.sh`
+    marcó `/contacto` como diferente contra el nuevo baseline (una vez que el
+    cache ya estaba asentado, ver defecto #25); revertido el cambio, volvió a
+    PASS.
