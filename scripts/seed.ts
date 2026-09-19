@@ -12,14 +12,22 @@
  * duplicating or erroring. Following the pattern from scripts/migrate.ts:
  * `adapter-node` doesn't read .env, so this needs dotenv explicitly.
  *
+ * Also records one initial `revisions` row per entry (Lane A8 follow-up) —
+ * its seeded state, marked with `SEED_REVISION_CLIENT_ID` — so
+ * `rollback` always has a floor to restore to, even for an entry no agent
+ * has ever written through update_entry. Guarded so re-running this script
+ * never adds a duplicate or overwrites real revision history.
+ *
  * Usage: node --experimental-strip-types scripts/seed.ts
  */
 import 'dotenv/config';
 import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { collections, entries } from '../src/lib/server/cms/db/schema.ts';
+import { collections, entries, revisions } from '../src/lib/server/cms/db/schema.ts';
 import { collectionDefinitions } from '../src/lib/content.schema.ts';
+import { SEED_REVISION_CLIENT_ID } from '../src/lib/server/cms/mcp/revision-constants.ts';
 import * as source from './source-content.ts';
 
 // Standalone connection, following the same pattern as scripts/migrate.ts:
@@ -155,13 +163,14 @@ async function main() {
 	}
 
 	console.log(`==> Upserting ${seedEntries.length} entries...`);
+	const upsertedIds: { id: string; data: unknown }[] = [];
 	for (const entry of seedEntries) {
 		// This content is already live today, so both sides of the Lane A8
 		// draft/published split land in sync: published_position starts equal
 		// to the draft position (there is no separate "live order" yet to
 		// diverge from), and pending_delete starts false (nothing is queued
 		// for removal).
-		await db
+		const [row] = await db
 			.insert(entries)
 			.values({
 				collectionKey: entry.collectionKey,
@@ -185,8 +194,38 @@ async function main() {
 					pendingDelete: false,
 					updatedAt: new Date()
 				}
-			});
+			})
+			.returning({ id: entries.id });
+		upsertedIds.push({ id: row.id, data: entry.data });
 	}
+
+	// Every entry needs a "floor" revision — the seeded state it started
+	// at — so `rollback` always has something to restore to, even for an
+	// entry no agent has ever written through update_entry. Revisions
+	// otherwise only ever record what a write changed TO, never the
+	// starting point, so without this an entry seeded straight into
+	// Postgres (as every entry here is) has zero rollback history. Guarded
+	// by "insert only if this entry has no revision yet" so re-running this
+	// idempotent script never adds a duplicate floor or clobbers a real
+	// revision an agent made after the first seed.
+	console.log('==> Recording initial (seeded-state) revisions for entries that have none yet...');
+	let created = 0;
+	for (const { id, data } of upsertedIds) {
+		const existing = await db
+			.select({ id: revisions.id })
+			.from(revisions)
+			.where(eq(revisions.entryId, id))
+			.limit(1);
+		if (existing.length > 0) continue;
+		await db.insert(revisions).values({
+			entryId: id,
+			data,
+			clientId: SEED_REVISION_CLIENT_ID,
+			note: 'initial seeded state'
+		});
+		created++;
+	}
+	console.log(`    ${created} initial revision(s) created, ${upsertedIds.length - created} entr(y/ies) already had history.`);
 
 	console.log('Done.');
 }

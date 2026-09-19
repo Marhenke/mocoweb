@@ -17,7 +17,7 @@ import {
 	serializeEntry,
 	nextAppendPublishedPosition
 } from '../entry-store';
-import { recordRevision } from '../revisions';
+import { recordRevision, SEED_REVISION_CLIENT_ID } from '../revisions';
 import { regenerateForCollection } from '../../cache/regenerate';
 import { signPreviewToken, PREVIEW_QUERY_PARAM } from '../../auth/preview-token';
 import { routesForCollection } from '$lib/content.schema';
@@ -34,13 +34,22 @@ export const publishTool: ToolDefinition = {
 		'(`position` → `publishedPosition`), and deletions (any entry with `pendingDelete: true` is removed for ' +
 		'good) — then re-renders and re-caches every page this collection affects (see get_site_map for the ' +
 		'route↔collection map). This is the ONLY tool that moves production; everything else in this server ' +
-		'only ever edits the draft. Two modes: omit `slug` to publish the WHOLE collection at once (every ' +
-		'entry\'s current draft content, the full current draft order, and every pending delete, all together — ' +
-		'use this after reorder_entries, or when several entries changed together); pass `slug` to publish just ' +
-		'that one entry\'s current draft content on its own, leaving every other entry\'s live state and the live ' +
-		'order untouched (a brand-new never-before-published entry lands at the END of the live order, not ' +
-		'wherever it happens to sit in the draft order). Requires "publish" scope — a "write"-scoped token can ' +
-		'edit drafts all day and will get a 403 calling this.',
+		'only ever edits the draft.\n\n' +
+		'TWO MODES — pick deliberately, they do different things:\n' +
+		'  - Omit `slug` → WHOLE-COLLECTION mode: publishes every entry\'s current draft content, the full ' +
+		'current draft order, AND every pending delete, all at once. This is the ONLY mode that moves order — ' +
+		'if you just called reorder_entries and want that live, you MUST use this mode with no `slug`; calling ' +
+		'single-entry mode afterward will publish content but silently leave the live order exactly as it was. ' +
+		'Also republishes the current draft content of every OTHER already-published entry in the collection, ' +
+		'even ones you didn\'t mean to touch right now — fine if they\'re already in the state you want live, but ' +
+		'check list_entries first if you\'re not sure everything in this collection is ready to go out together.\n' +
+		'  - Pass `slug` → SINGLE-ENTRY mode: publishes just that one entry\'s current draft content (or, if it\'s ' +
+		'`pendingDelete`, removes it) and touches nothing else — every other entry\'s live content and the live ' +
+		'order are left exactly as they were. A brand-new never-before-published entry lands at the END of the ' +
+		'live order, not wherever it happens to sit in the draft order. Use this for an isolated content edit to ' +
+		'one entry when you specifically do NOT want to also push out whatever else is sitting in this ' +
+		"collection's draft.\n\n" +
+		'Requires "publish" scope — a "write"-scoped token can edit drafts all day and will get a 403 calling this.',
 	scope: 'publish',
 	inputSchema: {
 		type: 'object',
@@ -241,9 +250,12 @@ export const unpublishTool: ToolDefinition = {
 export const listRevisionsTool: ToolDefinition = {
 	name: 'list_revisions',
 	description:
-		"Lists an entry's revision history (every past `data` snapshot recorded by create_entry/update_entry, " +
-		'newest first), each with its `id` (pass to `rollback`), `clientId` (which MCP client made that change), ' +
-		'optional `note`, and `createdAt`. Read-only.',
+		"Lists an entry's revision history (every past `data` snapshot, newest first), each with its `id` (pass " +
+		'to `rollback`), `clientId` (which MCP client made that change), optional `note`, `createdAt`, and ' +
+		'`initial` — true on exactly one revision per entry: its seeded starting state (recorded by ' +
+		'scripts/seed.ts, `clientId: "system:seed"`), the floor of this entry\'s history. Rolling back to it undoes ' +
+		'every agent write ever made to this entry, all the way back to launch. It is always the OLDEST revision ' +
+		"(last in this newest-first list) if this entry has any history at all. Read-only.",
 	scope: 'read',
 	inputSchema: {
 		type: 'object',
@@ -287,6 +299,7 @@ export const listRevisionsTool: ToolDefinition = {
 			revisions: rows.map((r) => ({
 				id: r.id,
 				clientId: r.clientId,
+				initial: r.clientId === SEED_REVISION_CLIENT_ID,
 				note: r.note,
 				data: r.data,
 				createdAt: r.createdAt.toISOString()
