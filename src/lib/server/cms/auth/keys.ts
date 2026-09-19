@@ -55,3 +55,13 @@ export function getAccessTokenSigningKey(): Buffer {
 export function getRefreshTokenHashKey(): Buffer {
 	return derive('mocoweb-cms:oauth:refresh-token:v1');
 }
+
+/**
+ * Signing key for preview links (Lane A8's `preview_url` tool). Deriving
+ * this from OWNER_KEY too means preview links are covered by the same
+ * kill switch as everything else: rotate OWNER_KEY and every outstanding
+ * preview link stops working immediately, no revocation table needed.
+ */
+export function getPreviewTokenSigningKey(): Buffer {
+	return derive('mocoweb-cms:preview-token:v1');
+}

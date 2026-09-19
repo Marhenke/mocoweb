@@ -283,19 +283,28 @@ export const updateEntryTool: ToolDefinition = {
 export const deleteEntryTool: ToolDefinition = {
 	name: 'delete_entry',
 	description:
-		'Permanently deletes a draft entry. Refuses on two kinds of entry, both because this server never ' +
-		"changes what visitors see: (1) a singleton's entry — a singleton must always have exactly one, deleting " +
-		'it would leave the collection empty and break every page reading it; (2) any entry that has ever been ' +
-		'published (its `published_data` is not null) — deleting the row deletes that snapshot too, which would ' +
-		'remove it from the live site immediately, and this server implements no publish/unpublish/rollback to ' +
-		'undo that. Only entries that were created and never published can be deleted.',
+		'Deletes a draft entry — behavior depends on whether it has ever been published, because this server ' +
+		'never changes what visitors see outside of `publish`: (1) an entry that has NEVER been published ' +
+		'(`publishedData` is null) is deleted outright, immediately, right now. (2) an entry that HAS been ' +
+		'published (`publishedData` is not null) is NOT deleted yet — deleting the row would delete its live ' +
+		'snapshot too, taking it off the site instantly. Instead this sets `pendingDelete: true` on the entry: ' +
+		'it keeps rendering on the live site exactly as before, and disappears only on the next `publish` call ' +
+		'for this collection (or for this entry specifically), which is what actually removes the row. Call ' +
+		'again with `restore: true` to cancel a pending delete before publishing. Always refuses on a ' +
+		"singleton's entry — a singleton must always have exactly one, deleting it would leave the collection " +
+		'empty and break every page reading it.',
 	scope: 'write',
 	inputSchema: {
 		type: 'object',
 		properties: {
 			collection: { type: 'string', description: 'A collection key, e.g. "projects".' },
 			slug: { type: 'string', description: "The entry's slug." },
-			id: { type: 'string', description: "The entry's id (uuid). Alternative to `slug`." }
+			id: { type: 'string', description: "The entry's id (uuid). Alternative to `slug`." },
+			restore: {
+				type: 'boolean',
+				description:
+					'Set true to cancel a previously-set pendingDelete on a published entry instead of deleting/queuing it — undoes the effect of a prior delete_entry call, as long as publish has not run since.'
+			}
 		},
 		required: ['collection'],
 		additionalProperties: false
@@ -323,17 +332,47 @@ export const deleteEntryTool: ToolDefinition = {
 			);
 		}
 
-		if (row.publishedData !== null) {
+		const restore = args.restore === true;
+
+		if (restore) {
+			if (!row.pendingDelete) {
+				return textResult(
+					`Entry "${row.slug}" in collection "${key}" is not pending deletion — nothing to restore.`,
+					true
+				);
+			}
+			const [updated] = await db
+				.update(entries)
+				.set({ pendingDelete: false, updatedAt: new Date() })
+				.where(eq(entries.id, row.id))
+				.returning();
+			return textResult(serializeEntry(updated));
+		}
+
+		if (row.publishedData === null) {
+			// Never published: nothing live to protect, delete outright.
+			await db.delete(entries).where(eq(entries.id, row.id));
+			return textResult({ deleted: true, collection: key, id: row.id, slug: row.slug });
+		}
+
+		if (row.pendingDelete) {
 			return textResult(
-				`Entry "${row.slug}" in collection "${key}" has been published (published_data is set) — deleting ` +
-					'it would remove it from the live site immediately, and this server has no publish/unpublish/' +
-					'rollback tool (Lane A8) to undo that. Only never-published draft entries can be deleted.',
+				`Entry "${row.slug}" in collection "${key}" is already pending deletion — it will be removed on the ` +
+					'next publish. Call again with restore: true to cancel that.',
 				true
 			);
 		}
 
-		await db.delete(entries).where(eq(entries.id, row.id));
-		return textResult({ deleted: true, collection: key, id: row.id, slug: row.slug });
+		const [updated] = await db
+			.update(entries)
+			.set({ pendingDelete: true, updatedAt: new Date() })
+			.where(eq(entries.id, row.id))
+			.returning();
+		return textResult({
+			pendingDelete: true,
+			note: `Entry "${row.slug}" is still live. It will be removed from the site the next time collection "${key}" (or this entry) is published.`,
+			entry: serializeEntry(updated)
+		});
 	}
 };
 
@@ -344,12 +383,11 @@ export const deleteEntryTool: ToolDefinition = {
 export const reorderEntriesTool: ToolDefinition = {
 	name: 'reorder_entries',
 	description:
-		'Sets a new display order for every entry in a `list` collection, by giving the full list of slugs in ' +
-		'the desired order. IMPORTANT SCHEMA LIMITATION: `position` is a single column shared by draft and live ' +
-		'ordering — there is no separate "draft order" — so reordering necessarily changes the order any already-' +
-		'published entries render in, which this server otherwise never does. To keep that guarantee, this tool ' +
-		'refuses to run at all if ANY entry in the collection has ever been published (published_data is not ' +
-		'null on any of them). It only works on a collection where nothing has been published yet.',
+		'Sets a new DRAFT display order for every entry in a `list` collection, by giving the full list of slugs ' +
+		'in the desired order. This only ever changes `position` (the draft order) — the live site keeps ' +
+		'rendering in whatever order `publish` last froze into `publishedPosition`, completely unaffected, until ' +
+		'you call `publish` on this collection. Works freely on a collection that already has published entries ' +
+		'— reordering the draft is always safe; only `publish` can move production.',
 	scope: 'write',
 	inputSchema: {
 		type: 'object',
@@ -389,18 +427,6 @@ export const reorderEntriesTool: ToolDefinition = {
 		}
 
 		const rows = await listEntryRows(collection.key);
-
-		const published = rows.filter((r) => r.publishedData !== null);
-		if (published.length > 0) {
-			return textResult(
-				`Collection "${key}" has ${published.length} published entr${published.length === 1 ? 'y' : 'ies'} ` +
-					`(${published.map((r) => r.slug).join(', ')}). Reordering would change the live order of those ` +
-					'entries because `position` is shared between draft and published state in this schema — see the ' +
-					'tool description. Reordering is only available before anything in this collection has been ' +
-					'published.',
-				true
-			);
-		}
 
 		const currentSlugs = new Set(rows.map((r) => r.slug));
 		const orderSet = new Set(order);

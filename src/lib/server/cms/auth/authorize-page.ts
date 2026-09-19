@@ -90,8 +90,12 @@ export function renderAuthorizePage(params: AuthorizePageParams): string {
 		<fieldset>
 			<legend>Access level</legend>
 			<label class="option">
+				<input type="radio" name="granted_scope" value="publish" ${params.defaultScope === 'publish' ? 'checked' : ''}>
+				Read, write, and publish — this app can view, change, AND publish content to the live site
+			</label>
+			<label class="option">
 				<input type="radio" name="granted_scope" value="write" ${params.defaultScope === 'write' ? 'checked' : ''}>
-				Read and write — this app can view and change content
+				Read and write — this app can view and change draft content, but cannot publish it
 			</label>
 			<label class="option">
 				<input type="radio" name="granted_scope" value="read" ${params.defaultScope === 'read' ? 'checked' : ''}>

@@ -12,8 +12,9 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getAccessTokenSigningKey } from './keys';
+import { isScope, type Scope } from './scope';
 
-export type Scope = 'read' | 'write';
+export type { Scope };
 
 export interface AccessTokenPayload {
 	client_id: string;
@@ -76,7 +77,7 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
 
 	const now = Math.floor(Date.now() / 1000);
 	if (typeof payload.exp !== 'number' || payload.exp < now) return null;
-	if (payload.scope !== 'read' && payload.scope !== 'write') return null;
+	if (!isScope(payload.scope)) return null;
 	if (typeof payload.client_id !== 'string') return null;
 
 	return payload;

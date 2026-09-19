@@ -47,7 +47,12 @@ export const describeCollectionTool: ToolDefinition = {
 				'upload_media — that tool measures the real width/height/ratio from the file itself and returns them; ' +
 				'never estimate a ratio by hand or guess a path that was never uploaded.',
 			"A write is validated against exactly this schema before anything is saved. A rejected write's error " +
-				'message names the specific field path and rule that failed — fix that field and resubmit.'
+				'message names the specific field path and rule that failed — fix that field and resubmit.',
+			'Every write here (create_entry, update_entry, delete_entry, reorder_entries) only ever touches the ' +
+				'DRAFT side of an entry — its `data`/`position`/`pendingDelete`. Nothing visitors see changes until ' +
+				'`publish` is called on this collection (see get_site_map\'s instructions and the `publish`/' +
+				'`unpublish`/`preview_url`/`list_revisions`/`rollback` tools). Use preview_url to see the draft ' +
+				'rendered as a real page before publishing it.'
 		];
 
 		return textResult({

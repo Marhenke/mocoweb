@@ -304,16 +304,22 @@ export const projectSchema = z
 			.min(1)
 			.describe(
 				'The "El desafío" (the challenge) paragraph on the detail page: what problem the client had ' +
-					'before Moco got involved. Written in first-person-plural/client voice, in Spanish, matching ' +
-					"the rest of the site's copy. One paragraph, no line breaks."
+					'before Moco got involved. Written in Spanish, third person, plain and concrete — state the ' +
+					'client\'s situation/need, not a marketing pitch about it. REAL EXAMPLE from production ' +
+					'(project "sergio-castiglione"), copy the register, not the words: "Sergio necesitaba ' +
+					'construir una presencia online sólida y coherente, que lo represente bien en todos los ' +
+					'canales." One paragraph, no line breaks.'
 			),
 		solution: z
 			.string()
 			.min(1)
 			.describe(
 				'The "Lo que hicimos" (what we did) paragraph on the detail page: what Moco actually delivered, ' +
-					'in enough detail to be a real case-study, not just a restatement of `summary`. One ' +
-					'paragraph, no line breaks, same voice as `challenge`.'
+					'in enough detail to be a real case-study, not just a restatement of `summary`. Written in ' +
+					'Spanish, first-person-plural ("Diseñamos...", "Producimos...") — Moco describing its own work, ' +
+					'a deliberate voice shift from `challenge`\'s third person. REAL EXAMPLE from production (same ' +
+					'project): "Diseñamos su web, tomamos las riendas de sus redes y producimos reels que muestran ' +
+					'su trabajo con la calidad que se merece." One paragraph, no line breaks.'
 			),
 		gallery: gallerySchema
 	})
@@ -714,6 +720,30 @@ export interface RouteRegion {
 	collection: string;
 	/** What this region is and anything not obvious from the collection's own schema. */
 	note: string;
+	/**
+	 * Static-regeneration fan-out for this region (Lane A8), for a route
+	 * pattern containing a `{slug}` segment. Read only by the cache
+	 * regeneration engine (`src/lib/server/cms/cache/`) — irrelevant for a
+	 * literal (non-dynamic) pattern.
+	 *
+	 *   - 'entry' (default): only the one concrete page whose slug changed
+	 *     needs to be re-rendered.
+	 *   - 'collection': every currently-published entry's page in this
+	 *     dynamic route must be re-rendered whenever ANY entry in the
+	 *     collection changes, because this region's content depends on more
+	 *     than just its own entry.
+	 *
+	 * `/trabajos/{slug}` is 'collection' because it renders a "next project"
+	 * link computed from the full ordered list (see
+	 * `getProjectWithNext` in `content.ts`) — changing project A's title, or
+	 * publishing/unpublishing/reordering ANY project, can change what
+	 * appears on project B's page. This is not hypothetical: Lane A7 found
+	 * exactly this propagation (`.migration/LANES.md` defect #17) — mutating
+	 * one project's title broke two OTHER projects' rendered pages via this
+	 * link. Regenerating only the entry that changed would under-invalidate
+	 * and serve stale "next project" text/links on unrelated pages.
+	 */
+	regenerateScope?: 'entry' | 'collection';
 }
 
 export interface RouteDefinition {
@@ -846,11 +876,66 @@ export const siteRoutes: RouteDefinition[] = [
 			{
 				region: 'project',
 				collection: 'projects',
-				note: "The `projects` entry whose slug equals the URL's {slug} segment. This is a `list` collection: use list_entries or get_entry with that slug — there is no separate per-route collection for this page."
+				note: "The `projects` entry whose slug equals the URL's {slug} segment. This is a `list` collection: use list_entries or get_entry with that slug — there is no separate per-route collection for this page.",
+				regenerateScope: 'collection'
 			}
 		]
 	}
 ];
+
+// ---------------------------------------------------------------------------
+// Regeneration fan-out — the ONE place that turns "collection X changed"
+// into "these concrete paths need to be re-rendered" (Lane A8). Reuses
+// `siteRoutes` (the same data get_site_map reads) rather than a second,
+// independently-maintained route→collection mapping — see the brief for why
+// that reuse matters.
+// ---------------------------------------------------------------------------
+
+export interface RegenerationRoute {
+	pattern: string;
+	/** True if `pattern` has a `{slug}` segment (a per-entry dynamic page). */
+	dynamic: boolean;
+	regenerateScope: 'entry' | 'collection';
+}
+
+/**
+ * True if `pathname` matches one of this site's declared page routes
+ * (`siteRoutes`) — i.e. it is a page the static cache (Lane A8) may serve,
+ * as opposed to an API/auth/media route or an unknown path. A single-source
+ * check so the cache's notion of "a cacheable page" can never drift from
+ * the routes `get_site_map` actually reports.
+ */
+export function isKnownRoutePath(pathname: string): boolean {
+	return siteRoutes.some((route) => routePatternMatches(route.pattern, pathname));
+}
+
+function routePatternMatches(pattern: string, pathname: string): boolean {
+	const regex = new RegExp(
+		'^' +
+			pattern
+				.split('/')
+				.map((segment) => (segment.startsWith('{') ? '[^/]+' : segment))
+				.join('/') +
+			'$'
+	);
+	return regex.test(pathname);
+}
+
+/** Every route (and its regeneration fan-out) that renders content from this collection. */
+export function routesForCollection(collectionKey: string): RegenerationRoute[] {
+	const out: RegenerationRoute[] = [];
+	for (const route of siteRoutes) {
+		for (const region of route.regions) {
+			if (region.collection !== collectionKey) continue;
+			out.push({
+				pattern: route.pattern,
+				dynamic: route.pattern.includes('{slug}'),
+				regenerateScope: region.regenerateScope ?? 'entry'
+			});
+		}
+	}
+	return out;
+}
 
 export const collectionDefinitions: CollectionDefinition[] = [
 	{ key: 'projects', kind: 'list', label: 'Proyectos', schema: projectSchema },

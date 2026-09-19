@@ -8,14 +8,15 @@ import {
 	getContactCta
 } from '$lib/server/cms/content';
 
-export const load: PageServerLoad = async () => {
+export const load: PageServerLoad = async ({ locals }) => {
+	const opts = { draft: locals.preview };
 	const [estudioHero, values, services, process, team, contactCta] = await Promise.all([
-		getEstudioHero(),
-		getValues(),
-		getEstudioServices(),
-		getProcessSteps(),
-		getTeam(),
-		getContactCta()
+		getEstudioHero(opts),
+		getValues(opts),
+		getEstudioServices(opts),
+		getProcessSteps(opts),
+		getTeam(opts),
+		getContactCta(opts)
 	]);
 
 	return { estudioHero, values, services, process, team, contactCta };

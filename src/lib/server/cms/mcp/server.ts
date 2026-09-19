@@ -27,8 +27,11 @@ const SERVER_INSTRUCTIONS =
 	'read or change its content. Start with get_site_map to see every route and which collection governs each ' +
 	"content region, then describe_collection(key) for that region's full schema (its field descriptions carry " +
 	'rules a type alone cannot express — read them) before calling list_entries/get_entry or writing. All writes ' +
-	'land in a draft (`data`); nothing you do here changes what visitors currently see (`published_data`) — ' +
-	'publishing is a separate, not-yet-available step.';
+	'from create_entry/update_entry/delete_entry/reorder_entries land in a draft (`data`/`position`); nothing ' +
+	"they do changes what visitors currently see. `publish` is the one tool that does — call preview_url first " +
+	'to see the draft rendered as a real page, then `publish` when it looks right. `publish` and `unpublish` ' +
+	'require "publish" scope, a step up from "write"; if a call is rejected for insufficient scope, that is ' +
+	'this system working as intended, not a bug to route around.';
 
 export interface DispatchResult {
 	/** Response body to send. null means "no body" (a notification: HTTP 202/204). */

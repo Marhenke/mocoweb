@@ -16,7 +16,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A5 | Media: bucket, `/media/*`, upload | ✅ verificada |
 | A6 | OAuth Authorization Server (10/10 criterios) | ✅ verificada |
 | A7 | Tools MCP + descubrimiento (10 tools, 7/7 criterios) | ✅ verificada |
-| A8 | Borrador, publicación, regeneración estática | pendiente |
+| A8 | Borrador, publicación, regeneración estática | ✅ verificada |
 | A9 | Railway: provisioning, deploy, cutover | pendiente — login ✅ hecho, proyecto `mocoweb` ya existe |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
@@ -146,23 +146,23 @@ Los tres huecos originales, re-chequeados contra lo que las tools MCP devuelven 
 
 Huecos nuevos encontrados al construir A7 (no estaban en la lista original):
 
-- **`reorder_entries` no puede tocar una colección con algo publicado.** El schema de A2 tiene una
-  sola columna `position`, compartida entre el orden draft y el orden en vivo — no existe un
-  "orden de borrador" separado. Reordenar cambiaría inmediatamente el orden que ve el visitante,
-  lo cual A7 tiene prohibido. La tool lo verifica y se niega con un mensaje explícito si CUALQUIER
-  entry de la colección ya fue publicada; hoy eso significa que `reorder_entries` es inutilizable en
-  `projects` (las 6 entries de producción están publicadas) y solo funciona en una colección
-  todavía virgen. A8, o un cambio de schema, tendría que separar el orden de borrador del de
-  publicación (por ejemplo, dos columnas de posición) para que reordenar un catálogo ya publicado
-  sea posible sin tocar el sitio en vivo.
-- **`delete_entry` se niega si la entry tiene `published_data`**, por el mismo motivo (borrarla
-  borra también su snapshot publicado). Hoy no hay forma de sacar un proyecto publicado del sitio
-  vía MCP — ni con `delete_entry` ni con ninguna otra tool de A7 — hasta que A8 tenga
-  publish/unpublish/rollback.
-- **`create_entry` siempre agrega al final** (no acepta `position`), a propósito, para no poder
-  insertar nunca antes de una entry publicada. Combinado con los dos puntos anteriores: un agente
-  no tiene HOY ninguna forma de insertar un proyecto nuevo en el medio del listado publicado — solo
-  puede agregarlo al final. Es una limitación real de la superficie actual de A7, no un bug.
+- ~~`reorder_entries` no puede tocar una colección con algo publicado~~ — **cerrado en A8.** Se
+  agregó `entries.published_position` (columna separada de `position`, ver migración
+  `drizzle/0001_wonderful_tyger_tiger.sql`): `position` es ahora exclusivamente el orden de
+  borrador, `published_position` es el orden que ve el visitante, congelado en el último
+  `publish`. `reorder_entries` ya no tiene ninguna restricción; probado reordenando `projects`
+  (que tiene las 6 entries de producción publicadas) sin mover el sitio en vivo hasta el `publish`
+  explícito.
+- ~~`delete_entry` se niega si la entry tiene `published_data`~~ — **cerrado en A8.** Se agregó
+  `entries.pending_delete`: borrar una entry publicada ya no la borra de la base — la marca
+  `pending_delete: true` (sigue en vivo tal cual) y recién `publish` borra la fila de verdad.
+  `delete_entry(restore: true)` deshace la marca antes de publicar. Ver tools `publish` /
+  `unpublish` / `list_revisions` / `rollback` / `preview_url` nuevas en
+  `src/lib/server/cms/mcp/tools/publish.ts`.
+- **`create_entry` sigue agregando siempre al final** (sin cambios en A8) — pero ya no es una
+  limitación real: `reorder_entries` ahora funciona libremente sobre el orden de borrador aunque
+  la colección tenga entries publicadas, así que "crear al final + reordenar" cubre insertar en
+  cualquier posición.
 
 ## Bugs de contenido preexistentes (NO tocar en la migración)
 

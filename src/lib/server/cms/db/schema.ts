@@ -10,6 +10,7 @@
 
 import {
 	bigint,
+	boolean,
 	index,
 	integer,
 	jsonb,
@@ -40,6 +41,32 @@ export const collections = pgTable('collections', {
  * and is always present; `published_data` is a frozen snapshot of what
  * visitors currently see, and is NULL until the entry is published for the
  * first time.
+ *
+ * ── Draft/published split (Lane A8) ─────────────────────────────────────
+ * `position` and `published_position` are DELIBERATELY two separate
+ * columns, not one shared column: `position` is the draft display order (an
+ * agent free to reorder at will, e.g. via reorder_entries), and
+ * `published_position` is the order the live site actually renders in,
+ * frozen at whatever it was set to on the last `publish`. Before the first
+ * publish, `published_position` is NULL — the entry isn't live, so it has
+ * no live order. This is what makes "reorder the draft" and "reorder
+ * production" two different, independently-timed actions: nothing written
+ * to `position` is visible to a visitor until a `publish` copies it into
+ * `published_position`. (Lane A7 found this was impossible with a single
+ * shared `position` column — see `.migration/LANES.md`'s "reorder_entries
+ * cannot touch a collection with anything published" defect.)
+ *
+ * `pending_delete` is the equivalent mechanism for existence rather than
+ * order: a draft cannot simply delete a row that has ever been published
+ * (that would delete `published_data` too, taking the entry off the live
+ * site immediately — this schema's one hard rule is that nothing the draft
+ * does is visible until `publish`). Setting `pending_delete = true` instead
+ * records "remove this from the live site on the next publish" without
+ * touching `published_data`/`published_position` yet; `publish` is what
+ * actually deletes the row once it processes the flag. For an entry that
+ * has never been published, `delete_entry` still just deletes the row
+ * outright — `pending_delete` only exists to protect a row that has a live
+ * snapshot to protect.
  */
 export const entries = pgTable(
 	'entries',
@@ -53,6 +80,10 @@ export const entries = pgTable(
 		status: text('status').notNull().default('draft'), // 'draft' | 'published'
 		data: jsonb('data').notNull(),
 		publishedData: jsonb('published_data'),
+		/** Live display order. NULL until this entry's first publish; independent of `position` thereafter. */
+		publishedPosition: integer('published_position'),
+		/** Set by delete_entry on an already-published entry; consumed (row deleted) by the next `publish`. */
+		pendingDelete: boolean('pending_delete').notNull().default(false),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 	},
@@ -61,9 +92,17 @@ export const entries = pgTable(
 		// the lookup index for "find entry X in collection Y" (e.g. resolving
 		// /trabajos/[slug]).
 		uniqueIndex('entries_collection_key_slug_key').on(table.collectionKey, table.slug),
-		// Listing a collection's entries in display order is the primary read
-		// pattern (e.g. rendering /trabajos).
-		index('entries_collection_key_position_idx').on(table.collectionKey, table.position)
+		// Listing a collection's DRAFT order is the primary read pattern for
+		// MCP tools (list_entries, reorder_entries).
+		index('entries_collection_key_position_idx').on(table.collectionKey, table.position),
+		// Listing a collection's LIVE order is the primary read pattern for
+		// the public site (src/lib/server/cms/content.ts) — the whole point
+		// of splitting this out is that it is NOT the same index/order as
+		// the one above.
+		index('entries_collection_key_published_position_idx').on(
+			table.collectionKey,
+			table.publishedPosition
+		)
 	]
 );
 

@@ -156,6 +156,11 @@ async function main() {
 
 	console.log(`==> Upserting ${seedEntries.length} entries...`);
 	for (const entry of seedEntries) {
+		// This content is already live today, so both sides of the Lane A8
+		// draft/published split land in sync: published_position starts equal
+		// to the draft position (there is no separate "live order" yet to
+		// diverge from), and pending_delete starts false (nothing is queued
+		// for removal).
 		await db
 			.insert(entries)
 			.values({
@@ -165,6 +170,8 @@ async function main() {
 				status: 'published',
 				data: entry.data,
 				publishedData: entry.data,
+				publishedPosition: entry.position,
+				pendingDelete: false,
 				updatedAt: new Date()
 			})
 			.onConflictDoUpdate({
@@ -174,6 +181,8 @@ async function main() {
 					status: 'published',
 					data: entry.data,
 					publishedData: entry.data,
+					publishedPosition: entry.position,
+					pendingDelete: false,
 					updatedAt: new Date()
 				}
 			});

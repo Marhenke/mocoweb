@@ -106,7 +106,8 @@ export const POST: RequestHandler = async ({ request }) => {
 	const result = await dispatch(req, {
 		clientId: auth.clientId,
 		clientName: auth.clientName,
-		scope: auth.scope
+		scope: auth.scope,
+		origin: new URL(request.url).origin
 	});
 
 	if (result.body === null) {
