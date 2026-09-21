@@ -931,6 +931,31 @@ export const siteRoutes: RouteDefinition[] = [
 				regenerateScope: 'collection'
 			}
 		]
+	},
+	{
+		pattern: '/admin',
+		label: 'Admin chat panel',
+		description:
+			"The owner's own admin panel (Lane B5): a login screen (owner key, run through the site's own OAuth " +
+			'authorization-code + PKCE flow — no cookie) and a chat that operates this site through the same MCP ' +
+			'tool registry an external agent (Claude Desktop, ChatGPT) would use, in-process via /api/chat. Its ' +
+			'response varies per browser session (holds a bearer token in memory) and must never be shared across ' +
+			'visitors or served from the page cache — see `RouteDefinition.caching`\'s doc comment. No collection ' +
+			'backs it directly (an empty `regions` array here is correct, not an omission); it can end up touching ' +
+			'any collection indirectly, through the same tools/publish path every other MCP client uses.',
+		caching: 'dynamic',
+		regions: []
+	},
+	{
+		pattern: '/api/chat',
+		label: 'Admin chat backend',
+		description:
+			"POST-only endpoint behind /admin's chat (Lane B5): runs the Claude conversation loop server-side, " +
+			'executing tool calls in-process through the same tool registry and scope checks /api/mcp uses. Bearer- ' +
+			'token authenticated like every other CMS endpoint, never cookie-based. Not a content-bearing page — no ' +
+			'collection-backed regions (an empty `regions` array here is correct, not an omission).',
+		caching: 'dynamic',
+		regions: []
 	}
 ];
 
