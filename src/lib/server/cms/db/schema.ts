@@ -11,6 +11,7 @@
 import {
 	bigint,
 	boolean,
+	doublePrecision,
 	index,
 	integer,
 	jsonb,
@@ -282,5 +283,81 @@ export const oauthRefreshTokens = pgTable(
 		// Looking up tokens by client (e.g. revoke-all-for-client) is a
 		// secondary but obvious access pattern.
 		index('oauth_refresh_tokens_client_id_idx').on(table.clientId)
+	]
+);
+
+/**
+ * A conversation in the site admin's in-browser chat (Lane B5, `/admin`).
+ * `client_id` is the OAuth `client_id` the panel itself registered under
+ * (see `auth/tokens.ts`'s `registerClient` and the "Panel del sitio" name
+ * `routes/admin/+page.svelte` sends to `/register`) — the same identity
+ * space `revisions.client_id` already uses, so a draft/publish made from
+ * this chat is attributable exactly like one made from any other MCP
+ * client. There are no user accounts in this system (one owner key), so a
+ * conversation is scoped to "made through the panel," not to a person.
+ */
+export const chatConversations = pgTable(
+	'chat_conversations',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		clientId: text('client_id')
+			.notNull()
+			.references(() => oauthClients.clientId, { onDelete: 'cascade' }),
+		/** Short label for a conversation list, derived from its first user message. Never re-derived after creation. */
+		title: text('title'),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		// The admin panel's primary read pattern: "this client's conversations, most recently active first."
+		index('chat_conversations_client_id_updated_at_idx').on(table.clientId, table.updatedAt)
+	]
+);
+
+/**
+ * One turn of a chat conversation, stored in the exact shape the Anthropic
+ * Messages API uses for a `{role, content}` message param — `content` is
+ * always a JSON array of content blocks (text / image / tool_use /
+ * tool_result), never a bare string, so replaying a conversation back to the
+ * API on the next turn is a direct row→param mapping with no reshaping (see
+ * `chat/store.ts`). `role` is only ever `'user'` or `'assistant'`: a
+ * `tool_use` block lives inside an assistant row, and the matching
+ * `tool_result` block lives inside the NEXT user row, exactly as the
+ * Anthropic API itself models a tool-calling turn — there is no separate
+ * `'tool'` role.
+ *
+ * `input_tokens`/`output_tokens`/`cost_usd` are set only on assistant rows
+ * (one real API call in, one row out) and are what `chat/budget.ts` sums to
+ * enforce `CHAT_MONTHLY_BUDGET_USD` — see that module for why this is a
+ * per-call ledger rather than a single running counter. `budget_blocked` is
+ * true for the one kind of assistant row that was NEVER sent to the model at
+ * all (the friendly refusal shown once the month's budget is used up) — it
+ * carries zero cost by construction and exists so the conversation transcript
+ * still shows why the assistant went quiet, instead of silently having no
+ * reply.
+ */
+export const chatMessages = pgTable(
+	'chat_messages',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		conversationId: uuid('conversation_id')
+			.notNull()
+			.references(() => chatConversations.id, { onDelete: 'cascade' }),
+		role: text('role').notNull(), // 'user' | 'assistant'
+		content: jsonb('content').notNull(),
+		inputTokens: integer('input_tokens'),
+		outputTokens: integer('output_tokens'),
+		costUsd: doublePrecision('cost_usd'),
+		budgetBlocked: boolean('budget_blocked').notNull().default(false),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+	},
+	(table) => [
+		// A conversation's transcript is always read oldest-first, one conversation at a time.
+		index('chat_messages_conversation_id_created_at_idx').on(table.conversationId, table.createdAt),
+		// `chat/budget.ts` sums cost_usd for "this calendar month, across every
+		// conversation" — an index on created_at alone (not scoped to a
+		// conversation) is what makes that a range scan instead of a full
+		// table scan as history grows.
+		index('chat_messages_created_at_idx').on(table.createdAt)
 	]
 );

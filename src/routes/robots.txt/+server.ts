@@ -17,7 +17,8 @@ import type { RequestHandler } from './$types';
 export const GET: RequestHandler = async ({ url }) => {
 	const body = [
 		'User-agent: *',
-		'Disallow:',
+		'Disallow: /admin',
+		'Disallow: /api/chat',
 		'',
 		`Sitemap: ${url.origin}/sitemap.xml`,
 		'',
