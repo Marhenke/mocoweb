@@ -49,7 +49,21 @@
  *        anything that still throws past this — from here, from `resolve`,
  *        or from a route's own `load`.
  *
- * 5. First-party analytics (Lane B4). `recordPageView` is called for every
+ * 5. Admin panel CSP (Lane B5). Every response to `/admin` (and its
+ *    `/api/chat` backend) gets a strict `Content-Security-Policy` header —
+ *    added here, unconditionally, on every return path through this
+ *    function (GET or POST, cache hit or live render), rather than in the
+ *    route itself, so it can never be accidentally skipped by one code path
+ *    and not another. `/admin` holds a bearer access token in memory and
+ *    renders chat text (including, indirectly, tool output that can
+ *    originate from an anonymous site visitor's contact-form message) — an
+ *    XSS there would be a real token leak, which is exactly what this
+ *    header is for. Scoped to `/admin*` only, not site-wide: the public
+ *    pages load Google Fonts' stylesheet (`src/app.html`), and a
+ *    site-wide policy would need auditing this lane has no reason to do —
+ *    see `addAdminSecurityHeaders`'s own comment for the exact directives.
+ *
+ * 6. First-party analytics (Lane B4). `recordPageView` is called for every
  *    real page GET that reaches a response — on a cache HIT (line below the
  *    cache read) as much as on a live render — because the brief explicitly
  *    requires counting cache hits: most of this site's traffic IS a cache
@@ -84,6 +98,96 @@ const MCP_LINK_REL = 'mcp-server';
 
 function addMcpLinkHeader(response: Response, origin: string): void {
 	response.headers.append('Link', `<${origin}/api/mcp>; rel="${MCP_LINK_REL}"`);
+}
+
+/**
+ * Strict CSP for `/admin` and `/api/chat` (Lane B5) — see job 5 above.
+ * `script-src 'self'` with no `unsafe-inline`/`unsafe-eval` and no
+ * `data:`/external hosts is the directive that actually matters for the
+ * "XSS leaks the token" threat: the access token only ever lives in a JS
+ * variable, so blocking every script source except this origin's own built
+ * bundle is what makes an injected `<script>` (or an `javascript:`/inline
+ * event-handler payload) inert. `style-src`/`font-src` allow Google Fonts
+ * because `src/app.html` (the one shared shell for every route on this
+ * site, admin included) already loads Bricolage Grotesque/Inter from there
+ * — styles can't exfiltrate a bearer token the way scripts can, so
+ * widening only those two directives to match what the page already loads
+ * is a deliberate, narrow relaxation, not a gap in the policy that matters.
+ * `frame-ancestors 'none'` stops this page from being framed by another
+ * origin (clickjacking a logged-in admin session); `object-src 'none'` and
+ * `base-uri 'self'` close the two other classic CSP-bypass corners.
+ */
+const ADMIN_CSP = [
+	"default-src 'self'",
+	"script-src 'self'",
+	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+	"font-src 'self' https://fonts.gstatic.com",
+	"img-src 'self' data: blob:",
+	"connect-src 'self'",
+	"object-src 'none'",
+	"base-uri 'self'",
+	"form-action 'self'",
+	"frame-ancestors 'none'"
+].join('; ');
+
+/**
+ * SvelteKit itself always injects one inline `<script>` per HTML page to
+ * kick off hydration (the `kit.start(app, element, {...})` call visible in
+ * every rendered page's source) — there is no way to make it an external
+ * file, and no page-level code chooses to add it. A strict `script-src
+ * 'self'` with neither `unsafe-inline` nor a nonce blocks that inline
+ * script outright, which was caught by actually driving `/admin` in a real
+ * browser (per this lane's brief) rather than assumed: the page hung on
+ * "Cargando…" forever, and the console showed the exact CSP violation
+ * (`script-src 'self'` rejecting the inline script) plus the hash Chrome
+ * itself computed for it.
+ *
+ * Fix: compute that SAME hash server-side, per response — the CSP3 spec's
+ * `'sha256-...'` source lets a specific inline script's exact content
+ * authorize itself, which is what SvelteKit's own built-in `kit.csp`
+ * feature does automatically. That built-in feature is deliberately NOT
+ * used here because it is a site-wide `svelte.config`/vite-plugin option —
+ * turning it on would apply to every public route too, including the ones
+ * that embed a DIFFERENT inline script (the JSON-LD block on `/` and
+ * `/trabajos/{slug}`, Lane B1), which would need its own, separate fix and
+ * is out of scope for "add a strict CSP on /admin". Hashing here instead
+ * keeps the change scoped to exactly the two routes this lane owns.
+ */
+async function sha256Base64(text: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+	return btoa(String.fromCharCode(...new Uint8Array(digest)));
+}
+
+const INLINE_SCRIPT_RE = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+
+async function addAdminSecurityHeaders(response: Response, pathname: string): Promise<Response> {
+	if (pathname !== '/admin' && !pathname.startsWith('/admin/') && pathname !== '/api/chat') {
+		return response;
+	}
+
+	const contentType = response.headers.get('content-type') ?? '';
+	let csp = ADMIN_CSP;
+
+	if (contentType.includes('text/html')) {
+		const body = await response.text();
+		const hashes = new Set<string>();
+		for (const match of body.matchAll(INLINE_SCRIPT_RE)) {
+			hashes.add(`'sha256-${await sha256Base64(match[1])}'`);
+		}
+		if (hashes.size > 0) {
+			csp = csp.replace("script-src 'self'", `script-src 'self' ${[...hashes].join(' ')}`);
+		}
+		const headers = new Headers(response.headers);
+		headers.set('Content-Security-Policy', csp);
+		headers.set('X-Frame-Options', 'DENY');
+		headers.set('Referrer-Policy', 'no-referrer');
+		return new Response(body, { status: response.status, headers });
+	}
+
+	response.headers.set('Content-Security-Policy', csp);
+	response.headers.set('X-Frame-Options', 'DENY');
+	response.headers.set('Referrer-Policy', 'no-referrer');
+	return response;
 }
 
 /**
@@ -126,7 +230,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	event.locals.preview = false;
 
 	if (event.request.method !== 'GET') {
-		return resolve(event);
+		return addAdminSecurityHeaders(await resolve(event), event.url.pathname);
 	}
 
 	if (isInternalRenderRequest(event.request)) {
@@ -145,7 +249,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		// (locals.preview is false), not accidentally serve stale cached HTML.
 		const response = await resolve(event);
 		if (event.url.pathname === '/') addMcpLinkHeader(response, event.url.origin);
-		return response;
+		return addAdminSecurityHeaders(response, event.url.pathname);
 	}
 
 	// SvelteKit normalises client-side navigation requests before this hook
@@ -157,7 +261,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 	// Sub-requests (server-side `fetch` during SSR) are excluded for the same
 	// reason: the cache only ever holds whole documents, never partial data.
 	if (event.isDataRequest || event.isSubRequest) {
-		return resolve(event);
+		return addAdminSecurityHeaders(await resolve(event), event.url.pathname);
 	}
 
 	if (isKnownRoutePath(event.url.pathname)) {
@@ -177,7 +281,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 				referer: event.request.headers.get('referer'),
 				origin: event.url.origin
 			});
-			return response;
+			return addAdminSecurityHeaders(response, event.url.pathname);
 		}
 	}
 
@@ -189,7 +293,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		referer: event.request.headers.get('referer'),
 		origin: event.url.origin
 	});
-	return response;
+	return addAdminSecurityHeaders(response, event.url.pathname);
 };
 
 /**
