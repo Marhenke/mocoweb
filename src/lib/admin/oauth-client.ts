@@ -1,11 +1,11 @@
 /**
  * Browser-side OAuth 2.1 (authorization code + PKCE) client for `/admin`
  * (Lane B5). Runs the SAME flow an external MCP client (Claude Desktop,
- * ChatGPT) already runs against this site's own `/register`, `/authorize`,
- * and `/token` — nothing new on the server side, no special "admin login"
- * endpoint. That's deliberate: the whole reason this repo's CSRF guard is
- * disabled (`csrf.trustedOrigins: ['*']`, see `vite.config.ts`) is that NO
- * request here ever carries an ambient cookie credential, and a bespoke
+ * ChatGPT) already runs against this site's own `/authorize` and `/token`
+ * — nothing new on the server side, no special "admin login" endpoint.
+ * That's deliberate: the whole reason this repo's CSRF guard is disabled
+ * (`csrf.trustedOrigins: ['*']`, see `vite.config.ts`) is that NO request
+ * here ever carries an ambient cookie credential, and a bespoke
  * cookie-based admin login would break that invariant. So this module:
  *
  *   - Never sets a cookie, never reads one.
@@ -20,13 +20,26 @@
  *     (`rotateRefreshToken` re-derives the hash key from the *current*
  *     `OWNER_KEY` on every lookup) — there is nothing extra to revoke here.
  *
+ * ── No Dynamic Client Registration (Lane B5 follow-up) ───────────────────
+ * Earlier, this module called `POST /register` on first use to mint itself
+ * a `client_id`. It now sends the FIXED `INTERNAL_PANEL_CLIENT_ID` instead
+ * — the panel is a permanent, server-owned identity (see
+ * `auth/internal-client.ts`), not a self-registering one, which is what
+ * lets `/authorize` recognize it server-side and grant full access with no
+ * scope screen (a random DCR client_id could never be trusted that way).
+ * This module never decides that trust itself; it just sends the same
+ * fixed id every time. `client_id` is a public identifier, not a secret
+ * (see `routes/register/+server.ts`'s header) — hardcoding it in
+ * client-side code grants nothing by itself.
+ *
  * `code_verifier` generation and the S256 `code_challenge` use
  * `crypto.getRandomValues`/`crypto.subtle.digest`, the Web Crypto API —
  * available in every browser this admin panel needs to run in, no
  * dependency required.
  */
 
-const CLIENT_ID_KEY = 'moco_admin_client_id';
+import { INTERNAL_PANEL_CLIENT_ID } from './internal-client-id';
+
 const REFRESH_TOKEN_KEY = 'moco_admin_refresh_token';
 
 export interface TokenSet {
@@ -61,25 +74,6 @@ async function sha256Base64Url(input: string): Promise<string> {
 	return toBase64Url(new Uint8Array(digest));
 }
 
-/** Registers this browser's panel as an OAuth client once (RFC 7591), reusing the same `client_id` on every later visit. `client_id` is not a secret — safe in `localStorage`. */
-export async function ensureClientId(): Promise<string> {
-	const existing = localStorage.getItem(CLIENT_ID_KEY);
-	if (existing) return existing;
-
-	const res = await fetch('/register', {
-		method: 'POST',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({
-			client_name: 'Panel del sitio',
-			redirect_uris: [`${location.origin}/admin`]
-		})
-	});
-	if (!res.ok) throw new Error('No se pudo registrar el panel como cliente OAuth.');
-	const data = (await res.json()) as { client_id: string };
-	localStorage.setItem(CLIENT_ID_KEY, data.client_id);
-	return data.client_id;
-}
-
 interface TokenResponse {
 	access_token: string;
 	refresh_token: string;
@@ -104,13 +98,13 @@ function persistTokens(data: TokenResponse): TokenSet {
  * `/admin` page, so the fetch redirect chain ends on a same-origin response
  * whose `.url` the page can read directly, with no page navigation and no
  * server-side session needed to correlate the two requests.
+ *
+ * No `scope`/`inbox` params anymore: the fixed internal client_id always
+ * gets the full `publish inbox` grant, enforced server-side in
+ * `routes/authorize/+server.ts` regardless of any form field this could
+ * send — see this file's header.
  */
-export async function loginWithOwnerKey(params: {
-	ownerKey: string;
-	scopeContent: 'read' | 'write' | 'publish';
-	inbox: boolean;
-}): Promise<TokenSet> {
-	const clientId = await ensureClientId();
+export async function loginWithOwnerKey(ownerKey: string): Promise<TokenSet> {
 	const redirectUri = `${location.origin}/admin`;
 	const verifier = randomBase64Url(32);
 	const challenge = await sha256Base64Url(verifier);
@@ -118,14 +112,12 @@ export async function loginWithOwnerKey(params: {
 
 	const form = new URLSearchParams();
 	form.set('response_type', 'code');
-	form.set('client_id', clientId);
+	form.set('client_id', INTERNAL_PANEL_CLIENT_ID);
 	form.set('redirect_uri', redirectUri);
 	form.set('state', state);
 	form.set('code_challenge', challenge);
 	form.set('code_challenge_method', 'S256');
-	form.set('owner_key', params.ownerKey);
-	form.set('granted_scope', params.scopeContent);
-	if (params.inbox) form.set('granted_scope_inbox', 'inbox');
+	form.set('owner_key', ownerKey);
 
 	const res = await fetch('/authorize', { method: 'POST', body: form });
 	if (!res.ok) {
@@ -145,7 +137,7 @@ export async function loginWithOwnerKey(params: {
 			grant_type: 'authorization_code',
 			code,
 			redirect_uri: redirectUri,
-			client_id: clientId,
+			client_id: INTERNAL_PANEL_CLIENT_ID,
 			code_verifier: verifier
 		})
 	});
@@ -170,7 +162,7 @@ export async function tryRefresh(): Promise<TokenSet | null> {
 	return persistTokens((await res.json()) as TokenResponse);
 }
 
-/** Drops the locally-held session. `client_id` is deliberately kept (not a secret, no reason to re-register). */
+/** Drops the locally-held session. */
 export function clearSession(): void {
 	localStorage.removeItem(REFRESH_TOKEN_KEY);
 }

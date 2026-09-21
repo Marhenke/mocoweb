@@ -5,11 +5,14 @@
  * consistent with why this whole engine's CSRF guard is disabled (see
  * `vite.config.ts`'s comment on `csrf.trustedOrigins`).
  *
- * POST runs one chat turn (`chat/agent.ts`) through the in-process tool
- * registry and returns every row the turn appended, so the browser can
- * render the full exchange (including intermediate tool calls) without a
- * second round trip. GET lists this panel's conversations, or one
- * conversation's messages with `?conversationId=`.
+ * There is exactly ONE conversation per site (Lane B5 follow-up — see
+ * `chat/store.ts`'s header). POST always resolves and runs a turn against
+ * that one conversation (any `conversationId` a caller sends is accepted
+ * back only for logging/consistency, never used to pick between several —
+ * `getOrCreateSingletonConversation` ignores it entirely). GET returns that
+ * one conversation and its messages, or nulls if nothing has been said yet.
+ * DELETE removes it outright ("Borrar conversación" in the UI) — every
+ * message cascades away with it, and the next POST starts a fresh one.
  *
  * Attachments arrive as base64 in the request body and are uploaded via the
  * SAME `uploadMedia` pipeline `upload_media` (the MCP tool) calls — directly,
@@ -24,10 +27,9 @@
 import { requireAuth } from '$lib/server/cms/auth/require-auth';
 import { uploadMedia } from '$lib/server/cms/media/upload';
 import {
-	createConversation,
-	getConversation,
-	conversationBelongsToClient,
-	listConversations,
+	getOrCreateSingletonConversation,
+	getConversationForClient,
+	deleteConversation,
 	listMessages,
 	type ChatMessageRow
 } from '$lib/server/cms/chat/store';
@@ -84,7 +86,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	if (typeof body !== 'object' || body === null) {
 		return Response.json({ error: 'invalid_request', error_description: 'Body must be a JSON object.' }, { status: 400 });
 	}
-	const { conversationId, message, attachments } = body as Record<string, unknown>;
+	const { message, attachments } = body as Record<string, unknown>;
 
 	const messageText = typeof message === 'string' ? message : '';
 	const attachmentInputs = parseAttachments(attachments);
@@ -96,21 +98,7 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	const origin = new URL(request.url).origin;
-
-	let convoId: string;
-	if (typeof conversationId === 'string' && conversationId.length > 0) {
-		const owned = await conversationBelongsToClient(conversationId, auth.clientId);
-		if (!owned) {
-			return Response.json(
-				{ error: 'not_found', error_description: 'No such conversation for this client.' },
-				{ status: 404 }
-			);
-		}
-		convoId = conversationId;
-	} else {
-		const created = await createConversation(auth.clientId, messageText || 'Imagen adjunta');
-		convoId = created.id;
-	}
+	const conversation = await getOrCreateSingletonConversation(auth.clientId);
 
 	// Upload every attachment through the real media pipeline BEFORE the
 	// model sees this turn — see this file's header comment.
@@ -147,12 +135,12 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	try {
 		const result = await runChatTurn({
-			conversationId: convoId,
+			conversationId: conversation.id,
 			userContent,
 			ctx: { clientId: auth.clientId, clientName: auth.clientName, scope: auth.scope, origin }
 		});
 		return Response.json({
-			conversationId: convoId,
+			conversationId: conversation.id,
 			assistantText: result.assistantText,
 			budgetBlocked: result.budgetBlocked,
 			messages: result.newRows.map(serializeRow),
@@ -196,39 +184,29 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 };
 
-export const GET: RequestHandler = async ({ request, url }) => {
+export const GET: RequestHandler = async ({ request }) => {
 	const auth = await requireAuth(request, 'read');
 	if (auth instanceof Response) return auth;
 
-	const conversationId = url.searchParams.get('conversationId');
-	if (conversationId) {
-		const owned = await conversationBelongsToClient(conversationId, auth.clientId);
-		if (!owned) {
-			return Response.json(
-				{ error: 'not_found', error_description: 'No such conversation for this client.' },
-				{ status: 404 }
-			);
-		}
-		const conversation = await getConversation(conversationId);
-		const messages = await listMessages(conversationId);
-		return Response.json({
-			conversation: conversation && {
-				id: conversation.id,
-				title: conversation.title,
-				createdAt: conversation.createdAt.toISOString(),
-				updatedAt: conversation.updatedAt.toISOString()
-			},
-			messages: messages.map(serializeRow)
-		});
-	}
-
-	const conversations = await listConversations(auth.clientId);
+	const conversation = await getConversationForClient(auth.clientId);
+	const messages = conversation ? await listMessages(conversation.id) : [];
 	return Response.json({
-		conversations: conversations.map((c) => ({
-			id: c.id,
-			title: c.title,
-			createdAt: c.createdAt.toISOString(),
-			updatedAt: c.updatedAt.toISOString()
-		}))
+		conversation: conversation && {
+			id: conversation.id,
+			title: conversation.title,
+			createdAt: conversation.createdAt.toISOString(),
+			updatedAt: conversation.updatedAt.toISOString()
+		},
+		messages: messages.map(serializeRow)
 	});
+};
+
+/** "Borrar conversación": deletes the site's one conversation and every message in it. A no-op (still `{ok:true}`) if there is nothing to delete yet. */
+export const DELETE: RequestHandler = async ({ request }) => {
+	const auth = await requireAuth(request, 'read');
+	if (auth instanceof Response) return auth;
+
+	const conversation = await getConversationForClient(auth.clientId);
+	if (conversation) await deleteConversation(conversation.id);
+	return Response.json({ ok: true });
 };

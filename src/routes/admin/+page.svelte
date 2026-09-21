@@ -1,11 +1,17 @@
 <script lang="ts">
 	/**
 	 * The admin chat panel (Lane B5). Two screens in one component: a login
-	 * form (owner key + scope choice, run through this site's own OAuth
-	 * authorization-code + PKCE flow — see `$lib/admin/oauth-client.ts`) and,
-	 * once authorized, a chat that talks to `/api/chat`. No cookie is ever
-	 * involved; the access token lives only in this component's in-memory
-	 * `tokens` state (see the file header of `oauth-client.ts` for why).
+	 * form (owner key only — no scope choice; the panel is the site's fixed
+	 * internal OAuth client and the server grants it full access
+	 * automatically, see `auth/internal-client.ts`) run through this site's
+	 * own OAuth authorization-code + PKCE flow (`$lib/admin/oauth-client.ts`),
+	 * and, once authorized, a chat that talks to `/api/chat`. No cookie is
+	 * ever involved; the access token lives only in this component's
+	 * in-memory `tokens` state (see the file header of `oauth-client.ts` for
+	 * why). There is exactly one conversation per site (see
+	 * `chat/store.ts`'s `getOrCreateSingletonConversation`) — "Borrar
+	 * conversación" clears it, there is no notion of switching between
+	 * several.
 	 */
 	import { onMount } from 'svelte';
 	import {
@@ -37,11 +43,6 @@
 		toolNames: string[];
 		budgetBlocked: boolean;
 	}
-	interface ConversationSummary {
-		id: string;
-		title: string | null;
-		updatedAt: string;
-	}
 	interface PendingFile {
 		file: File;
 		previewUrl: string | null;
@@ -50,21 +51,24 @@
 	let tokens = $state<TokenSet | null>(null);
 	let bootLoading = $state(true);
 
-	// Login form state
+	// Login form state — no scope choice anymore: the panel always logs in
+	// as the fixed internal client, which the server grants full access to
+	// automatically (see oauth-client.ts / auth/internal-client.ts).
 	let ownerKeyInput = $state('');
-	let scopeChoice = $state<'read' | 'write' | 'publish'>('write');
-	let inboxChoice = $state(false);
 	let loginError = $state('');
 	let loggingIn = $state(false);
 
-	// Chat state
-	let conversations = $state<ConversationSummary[]>([]);
+	// Chat state — there is exactly one conversation for this site (see
+	// chat/store.ts's getOrCreateSingletonConversation); `conversationId` is
+	// only kept to pass along to /api/chat, never shown or chosen in the UI.
 	let conversationId = $state<string | null>(null);
 	let items = $state<DisplayItem[]>([]);
 	let chatInput = $state('');
 	let sending = $state(false);
 	let chatError = $state('');
 	let pendingFiles = $state<PendingFile[]>([]);
+	let confirmingReset = $state(false);
+	let resettingConversation = $state(false);
 	let scrollAnchor: HTMLDivElement | undefined = $state();
 
 	function toDisplayItems(rows: StoredRow[]): DisplayItem[] {
@@ -113,23 +117,17 @@
 		return res;
 	}
 
-	async function loadMessages(id: string): Promise<void> {
-		const res = await authedFetch(`/api/chat?conversationId=${encodeURIComponent(id)}`);
-		if (!res.ok) return;
-		const data = (await res.json()) as { messages: StoredRow[] };
-		items = toDisplayItems(data.messages ?? []);
-		queueScroll();
-	}
-
-	async function loadConversations(): Promise<void> {
+	/** Loads the site's one conversation, if it exists yet. */
+	async function loadConversation(): Promise<void> {
 		const res = await authedFetch('/api/chat');
 		if (!res.ok) return;
-		const data = (await res.json()) as { conversations: ConversationSummary[] };
-		conversations = data.conversations ?? [];
-		if (conversations.length > 0) {
-			conversationId = conversations[0].id;
-			await loadMessages(conversations[0].id);
-		}
+		const data = (await res.json()) as {
+			conversation: { id: string } | null;
+			messages: StoredRow[];
+		};
+		conversationId = data.conversation?.id ?? null;
+		items = toDisplayItems(data.messages ?? []);
+		queueScroll();
 	}
 
 	function queueScroll(): void {
@@ -142,7 +140,7 @@
 				const refreshed = await tryRefresh();
 				if (refreshed) {
 					tokens = refreshed;
-					await loadConversations();
+					await loadConversation();
 				}
 			} catch {
 				// Silent — the login form is the fallback, no need to surface this.
@@ -156,13 +154,9 @@
 		loginError = '';
 		loggingIn = true;
 		try {
-			tokens = await loginWithOwnerKey({
-				ownerKey: ownerKeyInput,
-				scopeContent: scopeChoice,
-				inbox: inboxChoice
-			});
+			tokens = await loginWithOwnerKey(ownerKeyInput);
 			ownerKeyInput = '';
-			await loadConversations();
+			await loadConversation();
 		} catch (err) {
 			loginError = err instanceof Error ? err.message : 'Error desconocido.';
 		} finally {
@@ -174,13 +168,38 @@
 		clearSession();
 		tokens = null;
 		items = [];
-		conversations = [];
 		conversationId = null;
+		confirmingReset = false;
 	}
 
-	function startNewConversation(): void {
-		conversationId = null;
-		items = [];
+	function askResetConversation(): void {
+		confirmingReset = true;
+	}
+
+	function cancelResetConversation(): void {
+		confirmingReset = false;
+	}
+
+	/** "Borrar conversación": deletes the site's one conversation (and every message in it) after an explicit confirmation step. */
+	async function confirmResetConversation(): Promise<void> {
+		if (resettingConversation) return;
+		resettingConversation = true;
+		chatError = '';
+		try {
+			const res = await authedFetch('/api/chat', { method: 'DELETE' });
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error_description?: string };
+				throw new Error(body.error_description ?? 'No se pudo borrar la conversación.');
+			}
+			conversationId = null;
+			items = [];
+		} catch (err) {
+			if (err instanceof SessionExpiredError) tokens = null;
+			chatError = err instanceof Error ? err.message : 'Error desconocido.';
+		} finally {
+			resettingConversation = false;
+			confirmingReset = false;
+		}
 	}
 
 	function fileToBase64(file: File): Promise<string> {
@@ -241,8 +260,7 @@
 			chatInput = '';
 			for (const p of pendingFiles) if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
 			pendingFiles = [];
-			await loadMessages(conversationId);
-			await loadConversations();
+			await loadConversation();
 		} catch (err) {
 			if (err instanceof SessionExpiredError) tokens = null;
 			chatError = err instanceof Error ? err.message : 'Error desconocido.';
@@ -273,7 +291,7 @@
 		<div class="center-fill">
 			<form class="login-card" onsubmit={handleLogin}>
 				<h1>Panel de Moco</h1>
-				<p class="subtitle">Ingresá la clave del sitio para chatear con tu web.</p>
+				<p class="subtitle">Ingresá la clave del sitio para chatear con tu web. Tenés acceso completo: leer, escribir, publicar y ver los mensajes de contacto.</p>
 				{#if loginError}
 					<div class="error-box">{loginError}</div>
 				{/if}
@@ -287,25 +305,6 @@
 						disabled={loggingIn}
 					/>
 				</label>
-				<fieldset class="field">
-					<legend>Nivel de acceso al contenido</legend>
-					<label class="option">
-						<input type="radio" name="scope" value="publish" bind:group={scopeChoice} />
-						Leer, escribir y publicar
-					</label>
-					<label class="option">
-						<input type="radio" name="scope" value="write" bind:group={scopeChoice} />
-						Leer y escribir borradores (sin publicar)
-					</label>
-					<label class="option">
-						<input type="radio" name="scope" value="read" bind:group={scopeChoice} />
-						Solo leer
-					</label>
-				</fieldset>
-				<label class="option">
-					<input type="checkbox" bind:checked={inboxChoice} />
-					También permitir leer los mensajes del formulario de contacto
-				</label>
 				<button type="submit" disabled={loggingIn}>{loggingIn ? 'Ingresando…' : 'Ingresar'}</button>
 			</form>
 		</div>
@@ -317,7 +316,15 @@
 				<span>Panel</span>
 			</div>
 			<div class="topbar-actions">
-				<button type="button" class="ghost" onclick={startNewConversation}>Nueva conversación</button>
+				{#if confirmingReset}
+					<span class="confirm-text">¿Borrar toda la conversación?</span>
+					<button type="button" class="ghost" onclick={cancelResetConversation} disabled={resettingConversation}>Cancelar</button>
+					<button type="button" class="danger" onclick={confirmResetConversation} disabled={resettingConversation}>
+						{resettingConversation ? 'Borrando…' : 'Sí, borrar'}
+					</button>
+				{:else}
+					<button type="button" class="ghost" onclick={askResetConversation} disabled={items.length === 0}>Borrar conversación</button>
+				{/if}
 				<button type="button" class="ghost" onclick={logout}>Cerrar sesión</button>
 			</div>
 		</header>
@@ -425,8 +432,7 @@
 		padding: 0;
 	}
 
-	.field span,
-	.field legend {
+	.field span {
 		display: block;
 		font-size: 0.85rem;
 		font-weight: 600;
@@ -441,15 +447,6 @@
 		font-size: 1rem;
 		border-radius: 0.5rem;
 		border: 1px solid color-mix(in srgb, var(--color-ink) 25%, transparent);
-	}
-
-	.option {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		font-weight: normal;
-		font-size: 0.9rem;
-		margin: 0.3rem 0;
 	}
 
 	.error-box {
@@ -489,6 +486,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: 0.5rem;
 		padding: 0.85rem 1rem;
 		border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
 		background: var(--color-cream-dark);
@@ -505,6 +504,8 @@
 	}
 	.topbar-actions {
 		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
 	.ghost {
@@ -514,6 +515,26 @@
 		padding: 0.4rem 0.7rem;
 		font-size: 0.8rem;
 		color: var(--color-ink);
+	}
+	.ghost:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+	.danger {
+		background: crimson;
+		color: white;
+		border: 1px solid crimson;
+		border-radius: 0.5rem;
+		padding: 0.4rem 0.7rem;
+		font-size: 0.8rem;
+	}
+	.danger:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+	.confirm-text {
+		font-size: 0.78rem;
+		color: var(--color-muted);
 	}
 
 	.chat-area {

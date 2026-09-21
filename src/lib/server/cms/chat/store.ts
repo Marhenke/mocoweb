@@ -5,9 +5,25 @@
  * API expects for one `{role, content}` entry (see `db/schema.ts`'s doc
  * comment on `chatMessages`), so `toMessageParam` below is a direct,
  * lossless round-trip — no reshaping needed to resend history to the model.
+ *
+ * ── One conversation per site (Lane B5 follow-up) ────────────────────────
+ * The owner's own feedback after using the panel: there is exactly ONE
+ * conversation for a site, not a list to pick between — `chat_conversations`
+ * still exists as a table (dropping it would be a migration for no real
+ * benefit: it already gives every message a stable `conversation_id` for
+ * the FK/cascade-delete "Borrar conversación" needs), but
+ * `getOrCreateSingletonConversation` is now the ONLY way callers get a
+ * conversation id, and it always returns the SAME row for a given
+ * `client_id` — creating one only the first time. `deleteConversation`
+ * (backing "Borrar conversación") removes that row outright; `chat_messages`
+ * cascades with it (see `db/schema.ts`), and the next message starts a
+ * fresh row via the same function. There is no `listConversations` /
+ * multi-conversation listing anymore — it was removed, not just unused, so
+ * nothing in `routes/api/chat/+server.ts` or `routes/admin/+page.svelte`
+ * can reintroduce a "pick a conversation" UI by calling it.
  */
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { chatConversations, chatMessages } from '../db/schema';
 
@@ -36,32 +52,37 @@ export interface ChatConversationRow {
 	updatedAt: Date;
 }
 
-function deriveTitle(firstUserText: string): string {
-	const trimmed = firstUserText.trim().replace(/\s+/g, ' ');
-	if (trimmed.length === 0) return 'Conversación';
-	return trimmed.length > 60 ? `${trimmed.slice(0, 57)}...` : trimmed;
-}
+/**
+ * Returns the site's one conversation for `clientId`, creating it if this
+ * is the very first message ever. If more than one row somehow exists
+ * (e.g. left over from before this lane enforced a singleton), the most
+ * recently active one is used — tolerant of old data, never errors.
+ */
+export async function getOrCreateSingletonConversation(clientId: string): Promise<ChatConversationRow> {
+	const existing = await getConversationForClient(clientId);
+	if (existing) return existing;
 
-export async function createConversation(clientId: string, firstUserText: string): Promise<ChatConversationRow> {
 	const [row] = await db
 		.insert(chatConversations)
-		.values({ clientId, title: deriveTitle(firstUserText) })
+		.values({ clientId, title: 'Conversación del sitio' })
 		.returning();
 	return row;
 }
 
-export async function getConversation(id: string): Promise<ChatConversationRow | null> {
-	const rows = await db.select().from(chatConversations).where(eq(chatConversations.id, id)).limit(1);
-	return rows[0] ?? null;
-}
-
-export async function listConversations(clientId: string, limit = 50): Promise<ChatConversationRow[]> {
-	return db
+/** Read-only counterpart of `getOrCreateSingletonConversation` — used by GET/DELETE, which must never create an empty conversation just by being called. */
+export async function getConversationForClient(clientId: string): Promise<ChatConversationRow | null> {
+	const existing = await db
 		.select()
 		.from(chatConversations)
 		.where(eq(chatConversations.clientId, clientId))
 		.orderBy(desc(chatConversations.updatedAt))
-		.limit(limit);
+		.limit(1);
+	return existing[0] ?? null;
+}
+
+/** "Borrar conversación": removes the conversation row; every chat_messages row for it cascades away with it (db/schema.ts's onDelete: 'cascade'). */
+export async function deleteConversation(id: string): Promise<void> {
+	await db.delete(chatConversations).where(eq(chatConversations.id, id));
 }
 
 async function touchConversation(id: string): Promise<void> {
@@ -73,7 +94,7 @@ export async function listMessages(conversationId: string): Promise<ChatMessageR
 		.select()
 		.from(chatMessages)
 		.where(eq(chatMessages.conversationId, conversationId))
-		.orderBy(asc(chatMessages.createdAt));
+		.orderBy(chatMessages.createdAt);
 	return rows.map((r) => ({ ...r, role: r.role as ChatRole, content: r.content as ChatContentBlock[] }));
 }
 
@@ -100,16 +121,6 @@ export async function appendMessage(params: {
 		.returning();
 	await touchConversation(params.conversationId);
 	return { ...row, role: row.role as ChatRole, content: row.content as ChatContentBlock[] };
-}
-
-/** True if `conversationId` belongs to `clientId` — the one authorization check this store needs, since a conversation is scoped to the panel's own OAuth client, not a person. */
-export async function conversationBelongsToClient(conversationId: string, clientId: string): Promise<boolean> {
-	const rows = await db
-		.select({ id: chatConversations.id })
-		.from(chatConversations)
-		.where(and(eq(chatConversations.id, conversationId), eq(chatConversations.clientId, clientId)))
-		.limit(1);
-	return rows.length > 0;
 }
 
 /** Anthropic Messages API `{role, content}` param, straight from a stored row. */
