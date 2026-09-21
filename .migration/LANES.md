@@ -338,6 +338,26 @@ evidencia de los 8 criterios de aceptación).
     cache ya estaba asentado, ver defecto #25); revertido el cambio, volvió a
     PASS.
 
+## Lane B5 follow-up (feedback del dueño tras usar el panel)
+
+Tres cambios sobre lo ya descripto abajo: (1) el panel ahora es un cliente
+OAuth fijo y propio del servidor (`INTERNAL_PANEL_CLIENT_ID`,
+`auth/internal-client.ts`) — DCR nunca puede producir ese `client_id` (
+`/register` siempre genera uno al azar), y `/authorize` solo saltea la
+pantalla de scope y fuerza `publish inbox` cuando el `client_id` Y el
+`redirect_uri` coinciden exactamente con ese cliente fijo apuntando al
+`/admin` de este mismo origin — nunca por algo que el cliente mande. Probado
+con curl: un cliente DCR registrado con el mismo `client_name` ("Panel del
+sitio") Y el mismo `redirect_uri` sigue viendo la pantalla de scope normal y
+recibe exactamente el scope que pidió (`"scope":"read"` en la prueba). (2)
+`/authorize` reestilado con los tokens del sitio (bloque "SITE TOKENS" en
+`authorize-page.ts`, mismos valores que `layout.css`, swappable por cliente).
+(3) "Nueva conversación" → "Borrar conversación" con confirmación inline;
+`chat/store.ts` ya no tiene ninguna función de listar/crear conversaciones
+sueltas — solo `getOrCreateSingletonConversation`/`getConversationForClient`/
+`deleteConversation`, una conversación por sitio en la capa de datos, no solo
+escondida en la UI.
+
 ## Lane B5: `/admin`, el chat como cliente MCP en proceso
 
 Agrega un panel de administración (`/admin` + `POST /api/chat`) donde quien
