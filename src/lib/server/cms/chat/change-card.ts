@@ -1,16 +1,36 @@
 /**
- * The panel's "change card" (Lane B7) — replaces the old "borrador"/"draft"
- * language the owner found confusing with something concrete: a plain-
- * language summary of what changed, before/after text, image thumbnails,
- * which page(s) it affects, a preview link, and Aprobar/Descartar. See
- * `pending-changes.ts` for how the conversation-level pending set is
- * tracked, and `routes/api/chat/+server.ts` / `routes/api/chat/approve`,
- * `.../discard`, `.../undo` for where this is built and consumed.
+ * The site's one "change set" card (Lane B7, redesigned in Lane B8) — a
+ * plain-language summary of what's pending, which page(s) it affects, real
+ * preview links, and Aprobar/Descartar. See `pending-changes.ts` for how the
+ * conversation-level pending set (and the last-published snapshot, for
+ * Deshacer) is tracked, and `routes/api/chat/+server.ts` /
+ * `routes/api/chat/approve`, `.../discard`, `.../undo` for where this is
+ * built and consumed.
  *
- * This is deliberately Moco-specific in one place (`FIELD_LABELS` below,
- * plus the image-field heuristic) — same as `content.schema.ts` and
- * `system-prompt.ts` already are per their own header comments. A future
- * client site edits this the same way.
+ * ── Lane B8: stop reconstructing "what changed" — show the real page ────
+ * The B7 version of this card computed a field-by-field before/after diff
+ * and pulled image THUMBNAILS out of that diff (`diffFields`/
+ * `collectGalleryImages`, now removed) — including, for a gallery, always
+ * showing the project's EXISTING cover/gallery images, never the newly
+ * added one, because the diff heuristic only looked at top-level field
+ * identity, not which array entry was actually new. The owner's own
+ * feedback: the card showed a reconstruction of the change, and the
+ * reconstruction was wrong — worse than showing nothing, because it invites
+ * approving while looking at the wrong thing.
+ *
+ * This version builds exactly two things per entry instead: (1) `summary`,
+ * one short plain-language sentence fragment naming what kind of change
+ * happened (see `summarizeChange` below) — never a full before/after dump;
+ * and (2) `pages`, the real signed preview links this entry affects (this
+ * part is unchanged from B7). The UI (`PendingChangeBar.svelte`) renders the
+ * ACTUAL page in a live iframe against one of those preview links — the
+ * literal thing the visitor will see, not a picture assembled from field
+ * values — so what the owner approves is what was really typed/uploaded,
+ * never a guess.
+ *
+ * This is deliberately Moco-specific in one place (`FIELD_LABELS` below) —
+ * same as `content.schema.ts` and `system-prompt.ts` already are per their
+ * own header comments. A future client site edits this the same way.
  */
 
 import { getCollection } from '../mcp/collections';
@@ -18,21 +38,10 @@ import { resolveEntry, type EntryRow } from '../mcp/entry-store';
 import { routesForCollection } from '$lib/content.schema';
 import { signPreviewToken, PREVIEW_QUERY_PARAM } from '../auth/preview-token';
 
-export interface ChangeCardField {
-	label: string;
-	before: string;
-	after: string;
-}
-
-export interface ChangeCardImage {
-	url: string;
-	alt: string;
-}
-
 export interface ChangeCardPage {
 	pattern: string;
 	label: string;
-	/** Absolute URL, draft state, signed — what "Ver preview" opens. Only set for routes that don't need a slug the entry doesn't have (always set in practice). */
+	/** Absolute URL, draft state, signed — what "Ver preview" (and the pinned bar's own thumbnail) render. Only set for routes that don't need a slug the entry doesn't have (always set in practice). */
 	previewUrl: string | null;
 }
 
@@ -41,12 +50,18 @@ export interface ChangeCardEntry {
 	slug: string | null;
 	/** Human label for this entry, e.g. a project's title, or the collection's own display name for a singleton. */
 	label: string;
-	/** True if this entry has never been published before (a brand-new draft entry) — shown as "(nuevo)" rather than a before/after diff, since there is no "before". */
+	/** True if this entry has never been published before (a brand-new draft entry) — shown as "(nuevo)" rather than a diff, since there is no "before". */
 	isNew: boolean;
-	/** True if this change is a deletion (entry is `pendingDelete`) — shown as "se va a borrar", not a field diff. */
+	/** True if this change is a deletion (entry is `pendingDelete`) — shown as "se va a borrar". */
 	isDeletion: boolean;
-	fields: ChangeCardField[];
-	images: ChangeCardImage[];
+	/**
+	 * One short, plain-language sentence fragment naming what changed —
+	 * e.g. "se agregó 1 imagen a la galería", "se editó el título",
+	 * "cambios en 3 campos". Deliberately NOT a field-by-field diff (see
+	 * this file's header) — it names the KIND of change; the actual content
+	 * is what the page thumbnail/preview shows, not this text.
+	 */
+	summary: string;
 	pages: ChangeCardPage[];
 	/**
 	 * Captured only at approval time (see `routes/api/chat/approve`) — what
@@ -65,14 +80,9 @@ export interface ChangeCard {
 	/**
 	 * 'pending': awaiting Aprobar/Descartar. 'published': Aprobar succeeded,
 	 * this card's entries are live (each carries `approvedSnapshot` for
-	 * Deshacer). 'discarded': Descartar reverted every entry back to what
-	 * was live, nothing was ever published from this card. 'undone': this
-	 * card WAS published, then Deshacer restored the site to what it was
-	 * before — distinct from 'discarded' (the draft edit itself is
-	 * untouched by Deshacer, only what's live) so the UI can say "Deshecho"
-	 * rather than implying the change itself is gone.
+	 * Deshacer) — see `pending-changes.ts`'s `getLastPublished`.
 	 */
-	status: 'pending' | 'published' | 'discarded' | 'undone';
+	status: 'pending' | 'published';
 	entries: ChangeCardEntry[];
 	publishedAt?: string;
 }
@@ -88,115 +98,97 @@ export interface PendingEntryRef {
 // ---------------------------------------------------------------------------
 
 const FIELD_LABELS: Record<string, string> = {
-	title: 'Título',
-	headline: 'Título',
-	headlineLines: 'El título grande',
-	eyebrow: 'La etiqueta chica de arriba',
-	category: 'Categoría',
-	year: 'Año',
-	client: 'Cliente',
-	description: 'Descripción',
-	intro: 'Intro',
-	kicker: 'Etiqueta',
-	punchline: 'Frase final',
-	cover: 'Portada',
-	text: 'Texto',
-	name: 'Nombre',
-	role: 'Rol',
-	value: 'Valor',
-	label: 'Etiqueta',
-	href: 'Link',
-	ctaLabel: 'Texto del botón',
-	ctaHref: 'Link del botón'
+	title: 'el título',
+	headline: 'el título',
+	headlineLines: 'el título grande',
+	eyebrow: 'la etiqueta chica de arriba',
+	category: 'la categoría',
+	year: 'el año',
+	client: 'el cliente',
+	description: 'la descripción',
+	intro: 'la intro',
+	kicker: 'la etiqueta',
+	punchline: 'la frase final',
+	cover: 'la portada',
+	text: 'el texto',
+	name: 'el nombre',
+	role: 'el rol',
+	value: 'el valor',
+	label: 'la etiqueta',
+	href: 'el link',
+	ctaLabel: 'el texto del botón',
+	ctaHref: 'el link del botón',
+	gallery: 'la galería'
 };
 
 function humanizeFieldKey(key: string): string {
-	return FIELD_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1).replace(/([A-Z])/g, ' $1');
+	return FIELD_LABELS[key] ?? key.charAt(0).toLowerCase() + key.slice(1).replace(/([A-Z])/g, ' $1').toLowerCase();
 }
 
-/** Heuristic for "this string value is a media path, show it as a thumbnail, not text" — matches this engine's `mediaPath` schema shape (see `content.schema.ts`): always starts with "/". */
-function looksLikeMediaPath(value: unknown): value is string {
-	return typeof value === 'string' && /^\/(media|projects)\//.test(value);
-}
-
-function toAbsoluteMedia(origin: string, path: string): string {
-	return path.startsWith('http') ? path : `${origin}${path}`;
-}
-
-/** Collects every `src`/`video` path out of a gallery-shaped array (array of rows of cells — see `gallerySchema`), best-effort: doesn't error on a non-gallery array, just returns nothing. */
-function collectGalleryImages(origin: string, value: unknown, alt: string): ChangeCardImage[] {
-	if (!Array.isArray(value)) return [];
-	const out: ChangeCardImage[] = [];
+/** Counts every cell (image/video/gradient slot) across a gallery-shaped array of rows — best-effort, doesn't error on a non-gallery array, just returns 0. */
+function countGalleryCells(value: unknown): number {
+	if (!Array.isArray(value)) return 0;
+	let n = 0;
 	for (const row of value) {
-		if (!Array.isArray(row)) continue;
-		for (const cell of row) {
-			if (cell && typeof cell === 'object') {
-				const src = (cell as Record<string, unknown>).src;
-				if (typeof src === 'string' && src.length > 0) {
-					out.push({ url: toAbsoluteMedia(origin, src), alt });
-				}
-			}
-		}
+		if (Array.isArray(row)) n += row.length;
 	}
-	return out;
+	return n;
 }
 
-/** Shallow top-level diff between two entry `data` objects (or `publishedData: null` for a never-published entry) — matches `update_entry`'s own "shallow, top-level merge" semantics, so a diff here means exactly what caused a real write. */
-function diffFields(
-	origin: string,
+function pluralize(n: number, singular: string, plural: string): string {
+	return n === 1 ? singular : plural;
+}
+
+/**
+ * Builds the one-line, plain-language summary of what changed on an entry —
+ * see this file's header for why this replaced a field-by-field diff.
+ * Best-effort and deliberately coarse: it names the KIND of change (added/
+ * removed media, which field), never the literal before/after values — the
+ * page thumbnail is what shows the real content now.
+ */
+function summarizeChange(
 	before: Record<string, unknown> | null,
-	after: Record<string, unknown>
-): { fields: ChangeCardField[]; images: ChangeCardImage[] } {
-	const fields: ChangeCardField[] = [];
-	const images: ChangeCardImage[] = [];
-	const keys = new Set([...(before ? Object.keys(before) : []), ...Object.keys(after)]);
+	after: Record<string, unknown>,
+	isNew: boolean,
+	isDeletion: boolean
+): string {
+	if (isDeletion) return 'se va a borrar';
+	if (isNew || !before) return 'contenido nuevo';
+
+	const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+	const changedFields: string[] = [];
+	const parts: string[] = [];
+
 	for (const key of keys) {
-		const b = before ? before[key] : undefined;
+		const b = before[key];
 		const a = after[key];
 		if (JSON.stringify(b) === JSON.stringify(a)) continue;
 
-		if (looksLikeMediaPath(a) || looksLikeMediaPath(b)) {
-			if (looksLikeMediaPath(a)) images.push({ url: toAbsoluteMedia(origin, a), alt: humanizeFieldKey(key) });
+		if (key === 'gallery') {
+			const beforeCount = countGalleryCells(b);
+			const afterCount = countGalleryCells(a);
+			const diff = afterCount - beforeCount;
+			if (diff > 0) {
+				parts.push(`se agreg${pluralize(diff, 'ó', 'aron')} ${diff} ${pluralize(diff, 'imagen', 'imágenes')} a la galería`);
+			} else if (diff < 0) {
+				const removed = -diff;
+				parts.push(`se quit${pluralize(removed, 'ó', 'aron')} ${removed} ${pluralize(removed, 'imagen', 'imágenes')} de la galería`);
+			} else {
+				parts.push('se actualizó la galería');
+			}
 			continue;
 		}
-		if (key === 'gallery' || Array.isArray(a) || Array.isArray(b)) {
-			const galleryImgs = collectGalleryImages(origin, a, humanizeFieldKey(key));
-			if (galleryImgs.length > 0) {
-				images.push(...galleryImgs.slice(0, 6));
-				continue;
-			}
-			// A simple array of strings (e.g. `headlineLines`, `marqueeItems`)
-			// reads fine joined as text — this is the common case for
-			// site-copy fields that happen to be modeled as an array for
-			// layout reasons, not "structured data" a non-technical reader
-			// would find confusing.
-			const isStringArray = (v: unknown): v is string[] =>
-				Array.isArray(v) && v.every((x) => typeof x === 'string');
-			if (isStringArray(a) && (before === null || isStringArray(b))) {
-				fields.push({
-					label: humanizeFieldKey(key),
-					before: isStringArray(b) ? b.join(' / ') : '',
-					after: a.join(' / ')
-				});
-				continue;
-			}
-			// A structured array/object field that changed but isn't
-			// media-shaped and isn't simple strings either (e.g. a services
-			// list of {title, description}) — summarize rather than dump raw
-			// JSON at a non-technical reader.
-			fields.push({ label: humanizeFieldKey(key), before: before ? '(como estaba)' : '', after: '(cambió)' });
-			continue;
-		}
-		if (typeof a === 'string' || typeof b === 'string' || Array.isArray(a) === false) {
-			const asText = (v: unknown): string => {
-				if (v === undefined || v === null) return '';
-				if (Array.isArray(v)) return v.join(' / ');
-				return String(v);
-			};
-			fields.push({ label: humanizeFieldKey(key), before: asText(b), after: asText(a) });
-		}
+		changedFields.push(key);
 	}
-	return { fields, images };
+
+	if (changedFields.length === 1) {
+		parts.push(`se editó ${humanizeFieldKey(changedFields[0])}`);
+	} else if (changedFields.length > 1) {
+		parts.push(`cambios en ${changedFields.length} campos`);
+	}
+
+	if (parts.length === 0) return 'cambios preparados';
+	return parts.join(' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -256,10 +248,11 @@ function entryLabel(row: EntryRow, collectionKey: string, pages: ChangeCardPage[
 }
 
 /**
- * Builds one `ChangeCardEntry` from the entry's CURRENT db state — the diff
- * is always `publishedData` (before) vs `data` (after), computed live, never
- * cached, so it always reflects whatever the draft looks like right now
- * (including every accumulated edit since the last publish).
+ * Builds one `ChangeCardEntry` from the entry's CURRENT db state — the
+ * summary is always computed from `publishedData` (before) vs `data`
+ * (after), live, never cached, so it always reflects whatever the draft
+ * looks like right now (including every accumulated edit since the last
+ * publish).
  */
 export async function buildChangeCardEntry(
 	origin: string,
@@ -272,22 +265,21 @@ export async function buildChangeCardEntry(
 
 	const after = row.data as Record<string, unknown>;
 	const before = (row.publishedData as Record<string, unknown> | null) ?? null;
-	const { fields, images } = diffFields(origin, before, after);
+	const isNew = row.publishedData === null && !row.pendingDelete;
 	const pages = await buildPages(origin, ref.collection, collection.kind === 'singleton' ? null : row.slug);
 
 	return {
 		collection: ref.collection,
 		slug: collection.kind === 'singleton' ? null : row.slug,
 		label: entryLabel(row, ref.collection, pages),
-		isNew: row.publishedData === null && !row.pendingDelete,
+		isNew,
 		isDeletion: row.pendingDelete,
-		fields,
-		images,
+		summary: summarizeChange(before, after, isNew, row.pendingDelete),
 		pages
 	};
 }
 
-/** Builds the full card from the conversation's pending set. Drops any ref that no longer resolves to a real entry (deleted outright, or bad data) rather than erroring — a stale pointer must never break the whole chat. */
+/** Builds the full pending card from the conversation's pending set. Drops any ref that no longer resolves to a real entry (deleted outright, or bad data) rather than erroring — a stale pointer must never break the whole chat. */
 export async function buildChangeCard(origin: string, refs: PendingEntryRef[]): Promise<ChangeCard> {
 	const entries: ChangeCardEntry[] = [];
 	for (const ref of refs) {

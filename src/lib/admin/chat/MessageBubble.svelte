@@ -11,21 +11,14 @@
 	 */
 	import { renderMarkdown } from './markdown';
 	import { formatTime } from './format';
-	import ChangeCardView from './ChangeCardView.svelte';
 	import type { ChatBubble, ToolActivity } from './types';
 
 	interface Props {
 		bubble: ChatBubble;
 		tools: Record<string, ToolActivity>;
 		onRetry?: (bubble: ChatBubble) => void;
-		cardBusy?: boolean;
-		onCardPreview?: () => void;
-		onCardApprove?: () => void;
-		onCardDiscard?: () => void;
-		onCardUndo?: () => void;
 	}
-	let { bubble, tools, onRetry, cardBusy = false, onCardPreview, onCardApprove, onCardDiscard, onCardUndo }: Props =
-		$props();
+	let { bubble, tools, onRetry }: Props = $props();
 
 	let toolList = $derived(bubble.toolIds.map((id) => tools[id]).filter((t): t is ToolActivity => !!t));
 	let html = $derived(bubble.role === 'assistant' && bubble.text ? renderMarkdown(bubble.text) : '');
@@ -43,9 +36,15 @@
 		}
 	}
 
+	// Lane B8 — deliberately never renders an alarming icon for a tool call
+	// that errored: the chip only ever shows "in progress" or "done" (see
+	// `ChatPanel.svelte`'s `tool_result`/`rowsToBubbles` handling, which never
+	// sets `status: 'error'` anymore). `'error'` is kept in `ToolStatus`
+	// (`types.ts`) only so the type isn't a lie about what the server can send
+	// — this function still handles it defensively, but folded into the same
+	// checkmark as a normal success.
 	function statusIcon(status: ToolActivity['status']): string {
 		if (status === 'running') return '⏳';
-		if (status === 'error') return '⚠️';
 		return '✓';
 	}
 </script>
@@ -80,17 +79,6 @@
 
 		{#if bubble.stopped}
 			<div class="stopped-tag">Generación detenida</div>
-		{/if}
-
-		{#if bubble.changeCard}
-			<ChangeCardView
-				card={bubble.changeCard}
-				busy={cardBusy}
-				onPreview={() => onCardPreview?.()}
-				onApprove={() => onCardApprove?.()}
-				onDiscard={() => onCardDiscard?.()}
-				onUndo={() => onCardUndo?.()}
-			/>
 		{/if}
 
 		<div class="meta-row">
@@ -252,10 +240,6 @@
 		border-radius: 999px;
 		padding: 0.2em 0.65em;
 		margin: 0 0.3em 0.35em 0;
-	}
-	.tool-chip.status-error {
-		color: crimson;
-		background: color-mix(in srgb, crimson 10%, transparent);
 	}
 	.tool-icon {
 		font-size: 0.85em;

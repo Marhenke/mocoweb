@@ -1,9 +1,9 @@
 /**
- * "Descartar" (Lane B7) — reverts every entry in the conversation's current
- * pending change set back to exactly what's live, without publishing
- * anything. A plain bearer-token-authenticated POST the browser calls
- * directly (never the chat model) — see `routes/api/chat/approve`'s header
- * for the same reasoning applied here.
+ * "Descartar" (Lane B7, redesigned in Lane B8) — reverts every entry in the
+ * conversation's current pending change set back to exactly what's live,
+ * without publishing anything. A plain bearer-token-authenticated POST the
+ * browser calls directly (never the chat model) — see
+ * `routes/api/chat/approve`'s header for the same reasoning applied here.
  *
  * "Revert to live" means two different things depending on the entry's own
  * history, same distinction `delete_entry` already draws (see
@@ -15,15 +15,20 @@
  * existed. `write` scope is enough (this never touches `publishedData`
  * itself, only drafts) — narrower than "publish", matching every other
  * draft-only tool in this codebase.
+ *
+ * Only ever touches the PENDING set — a still-undoable earlier publish
+ * (`last_published`) is untouched by Descartar; that's a separate action
+ * (Deshacer, `routes/api/chat/undo`).
  */
 
 import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/cms/db/client';
 import { entries } from '$lib/server/cms/db/schema';
 import { requireAuth } from '$lib/server/cms/auth/require-auth';
-import { getConversationForClient, setChangeCard } from '$lib/server/cms/chat/store';
+import { getConversationForClient } from '$lib/server/cms/chat/store';
 import { getPendingChange, clearPendingChange } from '$lib/server/cms/chat/pending-changes';
 import { buildChangeCard } from '$lib/server/cms/chat/change-card';
+import { getOpenChangeSet } from '$lib/server/cms/chat/open-change-set';
 import { getCollection } from '$lib/server/cms/mcp/collections';
 import { resolveEntry } from '$lib/server/cms/mcp/entry-store';
 import type { RequestHandler } from './$types';
@@ -38,11 +43,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	const pending = await getPendingChange(conversation.id);
 	if (!pending || pending.entries.length === 0) {
-		return Response.json({ ok: true, card: null });
+		return Response.json({ ok: true, card: await getOpenChangeSet(conversation.id, origin) });
 	}
 
-	// Diff captured BEFORE reverting — the discarded card still shows what
-	// was thrown away, same as the "published" card shows what went live.
 	const freshCard = await buildChangeCard(origin, pending.entries);
 
 	for (const entryCard of freshCard.entries) {
@@ -67,7 +70,8 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	await clearPendingChange(conversation.id);
-	const discardedCard = { status: 'discarded' as const, entries: freshCard.entries };
-	const updated = pending.cardMessageId ? await setChangeCard(pending.cardMessageId, discardedCard) : null;
-	return Response.json({ ok: true, card: updated?.changeCard ?? discardedCard, messageId: pending.cardMessageId });
+	// Descartar never touches an already-undoable publish — only whatever
+	// was still pending.
+	const card = await getOpenChangeSet(conversation.id, origin);
+	return Response.json({ ok: true, card });
 };

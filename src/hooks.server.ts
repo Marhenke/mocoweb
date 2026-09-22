@@ -22,7 +22,13 @@
  *    reads to render DRAFT content instead of live content. No cookie is
  *    ever set for this — see `preview-token.ts`'s header comment for why a
  *    cookie session would be a real vulnerability given this app's
- *    `csrf.trustedOrigins: ['*']` (Lane A6).
+ *    `csrf.trustedOrigins: ['*']` (Lane A6). Lane B8: a valid preview
+ *    response also gets its same-origin relative links rewritten to carry
+ *    the same token (`injectPreviewToken`/`rewritePreviewResponse` below)
+ *    and `Referrer-Policy: no-referrer`, so clicking around inside a
+ *    preview — nav, a project card, "back" — stays in preview instead of
+ *    silently landing back on the live site; see `routes/+layout.svelte`
+ *    for the client-side half of that same fix.
  *
  * 3. Agent discovery (Lane B1). Every response to the site root (`/`) gets
  *    an HTTP `Link: <.../api/mcp>; rel="mcp-server"` header, one of the
@@ -184,6 +190,66 @@ function addPublicFrameHeader(response: Response): Response {
 	return response;
 }
 
+/**
+ * Lane B8 — closes the "preview leaks back to the live site" hole: a
+ * request carrying a valid `?__preview=<token>` must stay in preview for
+ * every link the owner clicks from there, not just the one page they
+ * hard-loaded. Every same-origin, site-relative `href`/`action` attribute
+ * in the rendered HTML gets the token appended (preserving whatever query/
+ * hash it already had). This is the SERVER half of the fix — see
+ * `routes/+layout.svelte`'s header for the CLIENT half this pairs with
+ * (a client-side navigation re-renders a route's own page content from
+ * Svelte's compiled template, which this string rewrite can never reach,
+ * since it only ever touches the one document actually served here).
+ *
+ * Deliberately conservative about what counts as "same-origin, site-
+ * relative": the value must start with exactly one `/` (the regex's
+ * negative lookahead excludes `//host` protocol-relative URLs). That single
+ * check is also what keeps an external link, `mailto:`, `tel:`, or a bare
+ * `#fragment` untouched — none of those start with a single `/` — so the
+ * token can never attach to anything that leaves this origin. A value that
+ * ALREADY contains `__preview=` (a real token from some other path, or the
+ * layout's own "Salir de la vista previa" link, which deliberately renders
+ * an EMPTY `__preview=` as an explicit opt-out marker — see that link's own
+ * comment) is left untouched, so this never double-appends and never
+ * overwrites the explicit exit.
+ */
+const LINK_ATTR_RE = /\b(href|action)=(["'])([^"']*)\2/g;
+
+function injectPreviewToken(html: string, token: string): string {
+	return html.replace(LINK_ATTR_RE, (full, attr: string, quote: string, value: string) => {
+		if (!/^\/(?!\/)/.test(value)) return full;
+		if (value.includes(`${PREVIEW_QUERY_PARAM}=`)) return full;
+		const hashIndex = value.indexOf('#');
+		const hash = hashIndex >= 0 ? value.slice(hashIndex) : '';
+		const withoutHash = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+		const qIndex = withoutHash.indexOf('?');
+		const base = qIndex >= 0 ? withoutHash.slice(0, qIndex) : withoutHash;
+		const query = qIndex >= 0 ? withoutHash.slice(qIndex + 1) : '';
+		const params = new URLSearchParams(query);
+		params.set(PREVIEW_QUERY_PARAM, token);
+		return `${attr}=${quote}${base}?${params.toString()}${hash}${quote}`;
+	});
+}
+
+/**
+ * Rewrites a preview response's HTML body (see `injectPreviewToken` above)
+ * and sets `Referrer-Policy: no-referrer` on it — the preview token lives
+ * only in the URL, so the ordinary `Referer` header on any outbound
+ * navigation (including to a genuinely external site the page links to)
+ * would otherwise carry it off this origin. A non-HTML preview response
+ * (the client router's own `__data.json` fetches) has no links to rewrite
+ * and is returned untouched.
+ */
+async function rewritePreviewResponse(response: Response, token: string): Promise<Response> {
+	const contentType = response.headers.get('content-type') ?? '';
+	if (!contentType.includes('text/html')) return response;
+	const body = await response.text();
+	const headers = new Headers(response.headers);
+	headers.set('Referrer-Policy', 'no-referrer');
+	return new Response(injectPreviewToken(body, token), { status: response.status, headers });
+}
+
 async function addAdminSecurityHeaders(response: Response, pathname: string): Promise<Response> {
 	if (pathname !== '/admin' && !pathname.startsWith('/admin/') && pathname !== '/api/chat') {
 		return addPublicFrameHeader(response);
@@ -271,7 +337,14 @@ export const handle: Handle = async ({ event, resolve }) => {
 		// param is never served from the (published-only) page cache — an
 		// invalid/expired token should fall through to a normal LIVE render
 		// (locals.preview is false), not accidentally serve stale cached HTML.
-		const response = await resolve(event);
+		let response = await resolve(event);
+		if (event.locals.preview) {
+			// Lane B8 — keep every link on this page inside preview too (see
+			// `injectPreviewToken`'s header). Only for a genuinely valid token —
+			// an invalid/expired one already renders the live page above, which
+			// must never be preview-linked into.
+			response = await rewritePreviewResponse(response, previewToken);
+		}
 		if (event.url.pathname === '/') addMcpLinkHeader(response, event.url.origin);
 		return addAdminSecurityHeaders(response, event.url.pathname);
 	}

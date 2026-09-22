@@ -34,9 +34,9 @@ import { toAnthropicTools, runTool, toolActivityLabel } from './tools-bridge';
 import { buildSystemPrompt } from './system-prompt';
 import { computeCostUsd } from './pricing';
 import { checkBudget, budgetExceededMessage, providerLimitExceededMessage } from './budget';
-import { appendMessage, listMessages, setChangeCard, toMessageParam, type ChatMessageRow } from './store';
-import { addPendingEntries, getPendingChange, relocateCard } from './pending-changes';
-import { buildChangeCard, type PendingEntryRef } from './change-card';
+import { appendMessage, listMessages, toMessageParam, type ChatMessageRow } from './store';
+import { addPendingEntries } from './pending-changes';
+import { buildChangeCard, type PendingEntryRef, type ChangeCard } from './change-card';
 import type { ToolContext } from '../mcp/types';
 
 /**
@@ -67,30 +67,25 @@ function extractTouchedRef(name: string, structuredContent: unknown): PendingEnt
 }
 
 /**
- * Builds/updates the ONE change card for whatever this turn (and any prior
- * still-unapproved turn) has touched, and attaches it to `targetRow` —
- * called right before every point `runChatTurnStream` returns with a real
+ * Merges whatever this turn touched into the conversation's ONE pending
+ * change set and rebuilds the card from it — Lane B8: this is no longer
+ * attached to any message row (see `pending-changes.ts`'s header for why).
+ * Called right before every point `runChatTurnStream` returns with a real
  * persisted final row (normal completion, Stop, the max-iterations notice).
- * A no-op (returns null) when nothing is pending, so a turn that didn't
- * touch content never grows an empty card. See `change-card.ts` /
- * `pending-changes.ts` for what this actually builds and stores.
+ * Returns null when the merged set is empty, so a turn that touched nothing
+ * (and had nothing pending already) never emits a pointless event. See
+ * `change-card.ts` / `pending-changes.ts` for what this actually builds and
+ * stores; `routes/api/chat/+server.ts` forwards the result as the
+ * `pending_change` SSE frame the persistent pinned bar renders from.
  */
-async function attachChangeCard(params: {
+async function refreshPendingChange(params: {
 	conversationId: string;
 	origin: string;
 	touchedThisTurn: PendingEntryRef[];
-	targetRow: ChatMessageRow;
-}): Promise<{ row: ChatMessageRow; previousCardMessageId: string | null } | null> {
-	const before = await getPendingChange(params.conversationId);
+}): Promise<ChangeCard | null> {
 	const merged = await addPendingEntries(params.conversationId, params.touchedThisTurn);
 	if (merged.length === 0) return null;
-	const card = await buildChangeCard(params.origin, merged);
-	const previousCardMessageId =
-		before?.cardMessageId && before.cardMessageId !== params.targetRow.id ? before.cardMessageId : null;
-	await relocateCard(params.conversationId, merged, params.targetRow.id);
-	const updated = await setChangeCard(params.targetRow.id, card);
-	if (!updated) return null;
-	return { row: updated, previousCardMessageId };
+	return buildChangeCard(params.origin, merged);
 }
 
 // Hard ceiling on model round-trips within a single user turn. This is a
@@ -147,7 +142,8 @@ export type AgentStreamEvent =
 	| { kind: 'tool_result'; id: string; name: string; isError: boolean }
 	| { kind: 'assistant_message'; row: ChatMessageRow }
 	| { kind: 'stopped'; row: ChatMessageRow }
-	| { kind: 'change_card'; row: ChatMessageRow; previousCardMessageId: string | null };
+	/** Lane B8 — the site's one pending change set changed (grew, most likely). Not tied to any row — the persistent pinned bar renders straight from `card`. */
+	| { kind: 'pending_change'; card: ChangeCard };
 
 interface StreamedBlock {
 	type: string;
@@ -264,16 +260,15 @@ export async function runChatTurnStream(params: {
 	// update_entry/delete_entry call THIS turn (can be more than one round
 	// of tool calls) — merged into the conversation's pending change set
 	// and turned into a change card right before this function returns. See
-	// `attachChangeCard` above and its call sites below.
+	// `refreshPendingChange` above and its call sites below.
 	const touchedThisTurn: PendingEntryRef[] = [];
-	async function finalizeCard(targetRow: ChatMessageRow): Promise<void> {
-		const result = await attachChangeCard({
+	async function finalizeCard(): Promise<void> {
+		const card = await refreshPendingChange({
 			conversationId: params.conversationId,
 			origin: params.ctx.origin,
-			touchedThisTurn,
-			targetRow
+			touchedThisTurn
 		});
-		if (result) emit({ kind: 'change_card', row: result.row, previousCardMessageId: result.previousCardMessageId });
+		if (card) emit({ kind: 'pending_change', card });
 	}
 
 	const initialBudget = await checkBudget();
@@ -315,7 +310,7 @@ export async function runChatTurnStream(params: {
 			});
 			newRows.push(row);
 			emit({ kind: 'stopped', row });
-			await finalizeCard(row);
+			await finalizeCard();
 			return { assistantText: text, newRows, budgetBlocked: false };
 		}
 
@@ -396,7 +391,7 @@ export async function runChatTurnStream(params: {
 				});
 				newRows.push(row);
 				emit({ kind: 'stopped', row });
-				await finalizeCard(row);
+				await finalizeCard();
 				return { assistantText: textOnly(blocks), newRows, budgetBlocked: false };
 			}
 			if (err instanceof MissingApiKeyError) throw err;
@@ -446,7 +441,7 @@ export async function runChatTurnStream(params: {
 		messages.push({ role: 'assistant', content });
 
 		if (stopReason !== 'tool_use') {
-			await finalizeCard(assistantRow);
+			await finalizeCard();
 			return { assistantText: extractText(content), newRows, budgetBlocked: false };
 		}
 
@@ -489,6 +484,6 @@ export async function runChatTurnStream(params: {
 	});
 	newRows.push(noticeRow);
 	emit({ kind: 'assistant_message', row: noticeRow });
-	await finalizeCard(noticeRow);
+	await finalizeCard();
 	return { assistantText: notice, newRows, budgetBlocked: false };
 }

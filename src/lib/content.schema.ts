@@ -39,20 +39,37 @@ import { z } from 'zod';
 
 /**
  * A site-internal path (starts with "/") pointing at an uploaded media file
- * under /static — e.g. "/projects/racebox/portada.jpg". This is NOT a full
- * URL and never starts with "http": external links use a different field.
- * The file must actually exist in the project's static assets; this schema
- * cannot verify that, so a value that doesn't resolve to a real file is a
- * broken image/video on the live site with no error anywhere else.
+ * — e.g. "/media/3f9a1c2b8e0d4f5a.jpg". This is NOT a full URL and never
+ * starts with "http": external links use a different field. The file must
+ * actually exist in the media store; this schema cannot verify that, so a
+ * value that doesn't resolve to a real file is a broken image/video on the
+ * live site with no error anywhere else.
+ *
+ * ── Lane B8: this is the exact field an agent used to guess at ──────────
+ * Production incident: after `upload_media` returned a real file, the chat
+ * agent still guessed a shape for this path (matching this docstring's OLD
+ * example, "/projects/racebox/portada.jpg" — a pre-migration path format
+ * that has not been real since the A5 media migration), got a validation
+ * error, corrected itself, and narrated the correction to the owner. The
+ * fix is here, not just in the agent's judgment: this description now shows
+ * the CURRENT real shape and says explicitly to copy `upload_media`'s own
+ * `url` verbatim, so there is nothing left to guess. See `mcp/tools/media.ts`
+ * (`upload_media` returns `url` in exactly this shape) and
+ * `chat/system-prompt.ts` for the other half of this fix (never narrate the
+ * correction even if one still happens).
  */
 const mediaPath = z
 	.string()
 	.regex(/^\//, 'Must be a site-relative path starting with "/", not a full URL.')
 	.describe(
-		'Path to an uploaded media file, relative to the site root (e.g. "/projects/racebox/portada.jpg"). ' +
-			'Must start with "/". Not an external URL — this file must be uploaded into the project\'s own ' +
-			'static assets. A path to a file that was never uploaded silently breaks that image or video ' +
-			'with no build error.'
+		'Path to an uploaded media file, relative to the site root. A real file today looks like ' +
+			'"/media/<hash>.<ext>" (e.g. "/media/3f9a1c2b8e0d4f5a.jpg") — this is EXACTLY the `url` value the ' +
+			'upload_media tool returns for the file you just uploaded (or list_media returns for one already ' +
+			'uploaded). Copy that `url` value here verbatim; never construct or guess this path by hand, and ' +
+			'never reuse a path shape you remember from an older file or example — it may no longer be real. ' +
+			'Must start with "/". Not an external URL — this file must already be uploaded into the media ' +
+			'store. A path to a file that was never uploaded silently breaks that image or video with no build ' +
+			'error.'
 	);
 
 /** A full external URL (http/https), for links off-site. */

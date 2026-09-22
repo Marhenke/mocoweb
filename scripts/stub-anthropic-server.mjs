@@ -171,6 +171,31 @@ function plans(intent, message) {
 		};
 	}
 
+	// Lane B8 — "internal failures must never reach the user": reproduces the
+	// exact shape of the production incident this lane's brief opens with
+	// (guess wrong, get a tool error, self-correct, succeed) WITHOUT the
+	// model ever narrating the failure or the correction. First step names a
+	// collection that doesn't exist (guaranteed `isError: true` from
+	// update_entry — see `mcp/tools/entries.ts`'s `collectionNotFoundMessage`);
+	// second step is the real, correct call. The point of this scenario is
+	// what a real browser shows across BOTH rounds: the tool chip for step 1
+	// must never render as an error (see `ChatPanel.svelte`'s `tool_result`
+	// handler), and `closingText` below — standing in for what a real model,
+	// following `system-prompt.ts`'s "never narrate internal mechanics" rule,
+	// would say — never mentions that anything went wrong first.
+	if (text.includes('forzá un error') || text.includes('forza un error')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [
+				{ name: 'update_entry', input: { collection: 'no-existe', patch: { eyebrow: 'x' } } },
+				{
+					name: 'update_entry',
+					input: { collection: 'homeHero', patch: { eyebrow: 'Estudio creativo — recuperado' } }
+				}
+			],
+			closingText: () => 'Listo, ya preparé el cambio en la etiqueta de arriba del título del home. Revisá la tarjeta para aprobarlo.'
+		};
+	}
 
 	if (text.includes('públic') || text.includes('publica') || text.includes('título del home') || text.includes('titulo del home') || text.includes('eyebrow')) {
 		return {

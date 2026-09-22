@@ -64,6 +64,7 @@ import {
 } from '$lib/server/cms/chat/store';
 import { runChatTurnStream, type AgentStreamEvent } from '$lib/server/cms/chat/agent';
 import { AnthropicApiError, MissingApiKeyError, type AnthropicContentBlock } from '$lib/server/cms/chat/anthropic-client';
+import { getOpenChangeSet } from '$lib/server/cms/chat/open-change-set';
 import type { RequestHandler } from './$types';
 
 function serializeRow(row: ChatMessageRow) {
@@ -76,7 +77,6 @@ function serializeRow(row: ChatMessageRow) {
 		costUsd: row.costUsd,
 		budgetBlocked: row.budgetBlocked,
 		stopped: row.stopped,
-		changeCard: row.changeCard,
 		createdAt: row.createdAt.toISOString()
 	};
 }
@@ -298,13 +298,8 @@ export const POST: RequestHandler = async ({ request }) => {
 							case 'stopped':
 								safeEnqueue(sseFrame('stopped', { row: serializeRow(event.row) }));
 								break;
-							case 'change_card':
-								safeEnqueue(
-									sseFrame('change_card', {
-										row: serializeRow(event.row),
-										previousCardMessageId: event.previousCardMessageId
-									})
-								);
+							case 'pending_change':
+								safeEnqueue(sseFrame('pending_change', { card: event.card }));
 								break;
 						}
 					}
@@ -389,8 +384,15 @@ export const GET: RequestHandler = async ({ request }) => {
 	const auth = await requireAuth(request, 'read');
 	if (auth instanceof Response) return auth;
 
+	const origin = new URL(request.url).origin;
 	const conversation = await getConversationForClient(auth.clientId);
 	const messages = conversation ? await listMessages(conversation.id) : [];
+	// Lane B8 — the persistent pinned bar has to reflect reality on every
+	// reload/re-login, not just while a turn is streaming: it is rebuilt here
+	// from the conversation's own state (pending set, or a still-undoable
+	// last publish), never read off a message row (there is no message row
+	// for it anymore — see `open-change-set.ts`).
+	const pendingChange = conversation ? await getOpenChangeSet(conversation.id, origin) : null;
 	return Response.json({
 		conversation: conversation && {
 			id: conversation.id,
@@ -398,7 +400,8 @@ export const GET: RequestHandler = async ({ request }) => {
 			createdAt: conversation.createdAt.toISOString(),
 			updatedAt: conversation.updatedAt.toISOString()
 		},
-		messages: messages.map(serializeRow)
+		messages: messages.map(serializeRow),
+		pendingChange
 	});
 };
 

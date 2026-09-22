@@ -43,6 +43,13 @@
       "when": 1790082186678,
       "tag": "0005_foamy_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790100199999,
+      "tag": "0006_quick_hercules",
+      "breakpoints": true
     }
   ]
 }
