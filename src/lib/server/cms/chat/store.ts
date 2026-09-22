@@ -41,6 +41,8 @@ export interface ChatMessageRow {
 	outputTokens: number | null;
 	costUsd: number | null;
 	budgetBlocked: boolean;
+	/** Lane B6 — true for a partial assistant reply persisted because the owner hit Stop mid-stream. See `db/schema.ts`'s column comment. */
+	stopped: boolean;
 	createdAt: Date;
 }
 
@@ -106,6 +108,7 @@ export async function appendMessage(params: {
 	outputTokens?: number | null;
 	costUsd?: number | null;
 	budgetBlocked?: boolean;
+	stopped?: boolean;
 }): Promise<ChatMessageRow> {
 	const [row] = await db
 		.insert(chatMessages)
@@ -116,7 +119,8 @@ export async function appendMessage(params: {
 			inputTokens: params.inputTokens ?? null,
 			outputTokens: params.outputTokens ?? null,
 			costUsd: params.costUsd ?? null,
-			budgetBlocked: params.budgetBlocked ?? false
+			budgetBlocked: params.budgetBlocked ?? false,
+			stopped: params.stopped ?? false
 		})
 		.returning();
 	await touchConversation(params.conversationId);

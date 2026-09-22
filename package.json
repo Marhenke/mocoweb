@@ -24,7 +24,8 @@
 		"db:seed": "node scripts/seed.ts",
 		"db:verify-roundtrip": "node scripts/verify-roundtrip.ts",
 		"db:migrate-media": "node scripts/migrate-media-from-tag.ts",
-		"setup:local": "bash scripts/setup-local.sh"
+		"setup:local": "bash scripts/setup-local.sh",
+		"chat:stub": "node scripts/stub-anthropic-server.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-node": "^5.5.4",
