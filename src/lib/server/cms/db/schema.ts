@@ -349,6 +349,16 @@ export const chatMessages = pgTable(
 		outputTokens: integer('output_tokens'),
 		costUsd: doublePrecision('cost_usd'),
 		budgetBlocked: boolean('budget_blocked').notNull().default(false),
+		/**
+		 * True when this row is a partial assistant reply persisted because the
+		 * owner hit Stop mid-stream (Lane B6) — see `chat/agent.ts`'s
+		 * `runChatTurnStream`. Only ever set on assistant rows. A stopped row's
+		 * `content` never contains an unpaired `tool_use` block (any in-flight
+		 * or not-yet-executed tool call is dropped before persisting, exactly
+		 * like `budgetBlocked` never leaves a dangling tool call either) — the
+		 * next turn's history is always a valid replay for the Anthropic API.
+		 */
+		stopped: boolean('stopped').notNull().default(false),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [

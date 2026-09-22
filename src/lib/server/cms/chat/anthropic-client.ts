@@ -69,16 +69,6 @@ export interface AnthropicUsage {
 	output_tokens: number;
 }
 
-export interface AnthropicResponse {
-	id: string;
-	role: 'assistant';
-	/** The model that actually served this response — pass this, not the requested model, to `computeCostUsd`. */
-	model: string;
-	content: AnthropicContentBlock[];
-	stop_reason: string | null;
-	usage: AnthropicUsage;
-}
-
 /**
  * `status` is the HTTP status; `errorType` is Anthropic's own
  * `error.type` field when the body parsed as JSON (e.g. `"rate_limit_error"`,
@@ -106,16 +96,103 @@ export class MissingApiKeyError extends Error {
 	}
 }
 
-export async function callClaude(params: {
-	system: string;
-	messages: AnthropicMessageParam[];
-	tools: AnthropicToolDef[];
-}): Promise<AnthropicResponse> {
+/**
+ * ── Streaming (Lane B6) ───────────────────────────────────────────────────
+ * `callClaudeStream` (below) is the only way this app calls the Messages
+ * API — a prior non-streaming `callClaude` (a single blocking request, no
+ * `stream: true`) was removed once `/api/chat`'s POST switched to SSE for
+ * every request; see `agent.ts`'s header for why keeping two call paths in
+ * sync wasn't worth it. The request shape is otherwise identical; only
+ * `stream: true` is added. The response body is Server-Sent Events, exactly
+ * as documented at
+ * https://platform.claude.com/docs/en/api/messages-streaming (fetched and
+ * verified live while building this lane, not assumed from training data —
+ * event names, field names and the exact per-event JSON shape below all
+ * match that page's worked examples): a `message_start` carrying the
+ * response id/model and the INPUT token count, then for each content block
+ * a `content_block_start` (empty text or an empty-`input` `tool_use`),
+ * zero or more `content_block_delta` (`text_delta.text` for prose,
+ * `input_json_delta.partial_json` for a tool call's arguments, streamed as
+ * fragments of a JSON string that must be concatenated then parsed once
+ * complete — never parsed fragment-by-fragment), and a `content_block_stop`;
+ * after every block, one `message_delta` carrying the final `stop_reason`
+ * and the OUTPUT token count, then `message_stop`. `ping` events can appear
+ * anywhere and carry no data worth acting on; an `error` event (e.g.
+ * `overloaded_error`) can appear instead of a normal completion and is
+ * surfaced here as a thrown `AnthropicApiError`, same as a non-2xx HTTP
+ * response.
+ *
+ * This is a raw line-by-line SSE parser, not a library — same "hand-roll the
+ * couple hundred lines this endpoint actually needs" precedent as the rest
+ * of this file's header comment. `signal` is threaded straight into `fetch`:
+ * aborting it (see `chat/agent.ts`'s stop handling) tears down the upstream
+ * HTTP connection to Anthropic immediately, not just the local read loop —
+ * generation actually stops server-side, not merely client-side.
+ */
+
+export type AnthropicStreamEvent =
+	| { type: 'message_start'; message: { id: string; model: string; usage: AnthropicUsage } }
+	| { type: 'content_block_start'; index: number; content_block: AnthropicContentBlock }
+	| {
+			type: 'content_block_delta';
+			index: number;
+			delta:
+				| { type: 'text_delta'; text: string }
+				| { type: 'input_json_delta'; partial_json: string }
+				| { type: string; [key: string]: unknown };
+	  }
+	| { type: 'content_block_stop'; index: number }
+	| {
+			type: 'message_delta';
+			delta: { stop_reason: string | null; stop_sequence: string | null };
+			usage: { output_tokens: number };
+	  }
+	| { type: 'message_stop' }
+	| { type: 'ping' }
+	| { type: 'error'; error: { type: string; message: string } };
+
+/**
+ * True when `err` is the local, synchronous consequence of `signal` firing
+ * (Node's `fetch`/stream machinery both throw a `DOMException` named
+ * `"AbortError"` for this) — `agent.ts` needs to tell "the caller asked us
+ * to stop" apart from a genuine network/API failure so it never shows the
+ * stop button's own abort as an error banner.
+ */
+export function isAbortError(err: unknown): boolean {
+	return err instanceof Error && err.name === 'AbortError';
+}
+
+/**
+ * Parses one SSE record (everything between a request/response's `event:`
+ * and `data:` lines up to a blank line) into a typed event. Anthropic always
+ * sends both an `event:` line and a `data:` line whose own `type` field
+ * matches it — this parses off the `data:` line's JSON (self-describing),
+ * using `event:` only to skip comment/keep-alive lines that carry no
+ * `data:` at all.
+ */
+function parseSseRecord(record: string): AnthropicStreamEvent | null {
+	let dataLine: string | null = null;
+	for (const line of record.split('\n')) {
+		if (line.startsWith('data:')) dataLine = line.slice(5).trim();
+	}
+	if (dataLine === null || dataLine.length === 0) return null;
+	try {
+		return JSON.parse(dataLine) as AnthropicStreamEvent;
+	} catch {
+		return null;
+	}
+}
+
+export async function* callClaudeStream(
+	params: { system: string; messages: AnthropicMessageParam[]; tools: AnthropicToolDef[] },
+	signal: AbortSignal
+): AsyncGenerator<AnthropicStreamEvent, void, unknown> {
 	const apiKey = process.env.ANTHROPIC_API_KEY;
 	if (!apiKey) throw new MissingApiKeyError();
 
 	const res = await fetch(messagesUrl(), {
 		method: 'POST',
+		signal,
 		headers: {
 			'content-type': 'application/json',
 			'x-api-key': apiKey,
@@ -126,7 +203,8 @@ export async function callClaude(params: {
 			max_tokens: MAX_TOKENS,
 			system: params.system,
 			messages: params.messages,
-			tools: params.tools
+			tools: params.tools,
+			stream: true
 		})
 	});
 
@@ -146,8 +224,40 @@ export async function callClaude(params: {
 			errorType
 		);
 	}
+	if (!res.body) {
+		throw new AnthropicApiError('Anthropic API streaming response had no body.', res.status);
+	}
 
-	return (await res.json()) as AnthropicResponse;
+	const reader = res.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buffer += decoder.decode(value, { stream: true });
+			// SSE records are separated by a blank line; \r\n and \n are both
+			// tolerated since Anthropic's own examples use bare \n but proxies
+			// in between could normalize line endings.
+			let boundary: number;
+			while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+				const record = buffer.slice(0, boundary);
+				buffer = buffer.slice(boundary + 2);
+				const event = parseSseRecord(record);
+				if (event === null) continue;
+				if (event.type === 'error') {
+					throw new AnthropicApiError(
+						`Anthropic API streaming error: ${event.error.message}`,
+						res.status,
+						event.error.type
+					);
+				}
+				yield event;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
 }
 
 /**
