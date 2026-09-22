@@ -18,6 +18,8 @@
 	import { streamChat, isAbortError } from './sse';
 	import { toolActivityLabelFallback } from './tool-labels';
 	import PreviewOverlay from './PreviewOverlay.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
+	import { validateAttachmentFiles } from './attachment-validation';
 	import type { ChatBubble, ToolActivity, PendingAttachment, ChangeCard } from './types';
 
 	interface ContentBlock {
@@ -60,6 +62,7 @@
 	let loadingHistory = $state(true);
 	let confirmingReset = $state(false);
 	let resettingConversation = $state(false);
+	let confirmingLogout = $state(false);
 	// Lane B7 — preview-approval state. `cardBusyId` is the bubble id whose
 	// Aprobar/Descartar/Deshacer is currently in flight (disables that
 	// card's buttons only, not the whole chat). `previewBubbleId`/
@@ -67,6 +70,14 @@
 	let cardBusyId = $state<string | null>(null);
 	let previewBubbleId = $state<string | null>(null);
 	let previewCard = $state<ChangeCard | null>(null);
+	// Lane B7 — page-wide drag-and-drop (moved here from `Composer.svelte`;
+	// see that component's header). `pageDragDepth` is a plain counter, not
+	// `$state`, because `dragenter`/`dragleave` fire once per DOM boundary
+	// the pointer crosses (they bubble like ordinary events, unlike
+	// mouseenter/mouseleave) — only `pageDragActive` (derived from the
+	// counter reaching/leaving zero) needs to be reactive.
+	let pageDragActive = $state(false);
+	let pageDragDepth = 0;
 
 	let conversationId: string | null = null;
 	let currentAbort: AbortController | null = null;
@@ -420,6 +431,12 @@
 						finalizeLiveBubble(row);
 						break;
 					}
+					case 'change_card': {
+						const row = d.row as StoredRow;
+						const previousCardMessageId = (d.previousCardMessageId as string | null) ?? null;
+						applyChangeCardEvent(row, previousCardMessageId);
+						break;
+					}
 					case 'done': {
 						resetLiveAnnounceTimer();
 						liveAnnouncement = (d.assistantText as string) || liveAnnouncement;
@@ -505,8 +522,12 @@
 		void runTurn(payload.text, attachments);
 	}
 
+	// Lane B7: a suggestion chip sends immediately (per the brief) rather than
+	// just filling the composer for the owner to press send themselves —
+	// tapping a suggestion IS the action, not a shortcut to typing it.
 	function handlePickSuggestion(text: string): void {
-		chatInput = text;
+		if (sending) return;
+		void runTurn(text, []);
 	}
 
 	function onFilesAdded(files: File[]): void {
@@ -524,6 +545,129 @@
 		const target = pendingAttachments.find((a) => a.id === id);
 		if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
 		pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
+	}
+
+	// ── Lane B7: page-wide drop ───────────────────────────────────────────
+	// `dragover` is ALWAYS prevented, regardless of what's being dragged —
+	// that's the one call that stops the browser from navigating to a
+	// dropped file (per the brief: "dropping outside the composer must
+	// never make the browser navigate to the file"). The overlay/attach
+	// behavior below it is additionally gated on the drag actually carrying
+	// files, so dragging plain text around the page is unaffected.
+	function isFileDrag(event: DragEvent): boolean {
+		return !!event.dataTransfer?.types.includes('Files');
+	}
+	function onWindowDragEnter(event: DragEvent): void {
+		event.preventDefault();
+		if (!isFileDrag(event)) return;
+		pageDragDepth++;
+		pageDragActive = true;
+	}
+	function onWindowDragOver(event: DragEvent): void {
+		event.preventDefault();
+	}
+	function onWindowDragLeave(event: DragEvent): void {
+		event.preventDefault();
+		pageDragDepth = Math.max(0, pageDragDepth - 1);
+		if (pageDragDepth === 0) pageDragActive = false;
+	}
+	function onWindowDrop(event: DragEvent): void {
+		event.preventDefault();
+		pageDragDepth = 0;
+		pageDragActive = false;
+		const files = Array.from(event.dataTransfer?.files ?? []);
+		if (files.length === 0) return;
+		const { ok, message } = validateAttachmentFiles(files);
+		if (message) chatError = message;
+		if (ok.length > 0) onFilesAdded(ok);
+	}
+
+	// ── Lane B7: preview-approval actions ────────────────────────────────────
+	// Each endpoint acts on the conversation's CURRENT pending set (approve/
+	// discard) or a specific card by message id (undo — see
+	// `routes/api/chat/undo`'s header for why undo needs the id explicitly).
+	// All three return `{ ok, card, messageId, error_description? }`; the
+	// returned card always replaces whatever that bubble was showing, so the
+	// UI never has to guess the new state itself.
+	function applyCardResult(fallbackBubbleId: string, data: Record<string, unknown>): void {
+		const messageId = (data.messageId as string | undefined) ?? fallbackBubbleId;
+		const card = (data.card as ChangeCard | null | undefined) ?? null;
+		bubbles = bubbles.map((b) => (b.id === messageId ? { ...b, changeCard: card } : b));
+		if (previewBubbleId === messageId) {
+			if (card && (card.status === 'pending' || card.status === 'published')) {
+				// Keep the overlay open: on Aprobar it now shows the page that's
+				// actually live (worth confirming at a glance), just without the
+				// action bar (see `PreviewOverlay.svelte` — only 'pending' gets one).
+				previewCard = card;
+			} else {
+				// Descartar/Deshacer: nothing left to review, close it.
+				previewBubbleId = null;
+				previewCard = null;
+			}
+		}
+		const errors = data.errors as string[] | undefined;
+		if (data.ok === false) {
+			chatError =
+				(data.error_description as string | undefined) ??
+				(errors && errors.length > 0
+					? `No se pudo completar del todo: ${errors[0]}`
+					: 'No se pudo completar la acción. Probá de nuevo.');
+		} else {
+			chatError = '';
+		}
+	}
+
+	async function postCardAction(path: string, bubbleId: string, body?: unknown): Promise<void> {
+		if (cardBusyId) return;
+		cardBusyId = bubbleId;
+		try {
+			const res = await authedFetch(path, {
+				method: 'POST',
+				headers: body ? { 'content-type': 'application/json' } : undefined,
+				body: body ? JSON.stringify(body) : undefined
+			});
+			let data: Record<string, unknown>;
+			try {
+				data = (await res.json()) as Record<string, unknown>;
+			} catch {
+				data = { ok: false, error_description: 'No se pudo leer la respuesta del servidor. Probá de nuevo.' };
+			}
+			if (!res.ok && !('card' in data)) {
+				chatError =
+					(data.error_description as string | undefined) ?? 'No se pudo completar la acción. Probá de nuevo.';
+				return;
+			}
+			applyCardResult(bubbleId, data);
+		} catch {
+			chatError = 'No se pudo conectar con el servidor. Revisá tu conexión y probá de nuevo.';
+		} finally {
+			cardBusyId = null;
+		}
+	}
+
+	function handleCardApprove(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/approve', bubble.id);
+	}
+	function handleCardDiscard(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/discard', bubble.id);
+	}
+	function handleCardUndo(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/undo', bubble.id, { messageId: bubble.id });
+	}
+	function handleCardPreview(bubble: ChatBubble): void {
+		if (!bubble.changeCard) return;
+		previewBubbleId = bubble.id;
+		previewCard = bubble.changeCard;
+	}
+	function closePreview(): void {
+		previewBubbleId = null;
+		previewCard = null;
+	}
+	function handlePreviewApprove(): void {
+		if (previewBubbleId) handleCardApprove({ id: previewBubbleId } as ChatBubble);
+	}
+	function handlePreviewDiscard(): void {
+		if (previewBubbleId) handleCardDiscard({ id: previewBubbleId } as ChatBubble);
 	}
 
 	function askResetConversation(): void {
@@ -549,9 +693,33 @@
 			confirmingReset = false;
 		}
 	}
+
+	function askLogout(): void {
+		confirmingLogout = true;
+	}
+	function cancelLogout(): void {
+		confirmingLogout = false;
+	}
+	function confirmLogout(): void {
+		confirmingLogout = false;
+		onLogout();
+	}
 </script>
 
+<svelte:window
+	ondragenter={onWindowDragEnter}
+	ondragover={onWindowDragOver}
+	ondragleave={onWindowDragLeave}
+	ondrop={onWindowDrop}
+/>
+
 <div class="chat-shell">
+	{#if pageDragActive}
+		<div class="page-drop-overlay" role="presentation">
+			<div class="page-drop-message">Soltá la imagen o el video para adjuntarlo</div>
+		</div>
+	{/if}
+
 	<div class="chat-topbar">
 		<div class="chat-topbar-title">
 			<span class="brand">Moco</span>
@@ -559,16 +727,8 @@
 			<span>Panel</span>
 		</div>
 		<div class="chat-topbar-actions">
-			{#if confirmingReset}
-				<span class="confirm-text">¿Borrar toda la conversación?</span>
-				<button type="button" class="ghost" onclick={cancelResetConversation} disabled={resettingConversation}>Cancelar</button>
-				<button type="button" class="danger" onclick={confirmResetConversation} disabled={resettingConversation}>
-					{resettingConversation ? 'Borrando…' : 'Sí, borrar'}
-				</button>
-			{:else}
-				<button type="button" class="ghost" onclick={askResetConversation} disabled={bubbles.length === 0}>Borrar conversación</button>
-			{/if}
-			<button type="button" class="ghost" onclick={onLogout}>Cerrar sesión</button>
+			<button type="button" class="ghost" onclick={askResetConversation} disabled={bubbles.length === 0}>Borrar conversación</button>
+			<button type="button" class="ghost" onclick={askLogout}>Cerrar sesión</button>
 		</div>
 	</div>
 
@@ -578,7 +738,19 @@
 		{:else if bubbles.length === 0}
 			<EmptyState onPick={handlePickSuggestion} />
 		{:else}
-			<MessageList {bubbles} {tools} showTyping={awaitingFirstToken} {liveAnnouncement} {updateTick} onRetry={handleRetry} />
+			<MessageList
+				{bubbles}
+				{tools}
+				showTyping={awaitingFirstToken}
+				{liveAnnouncement}
+				{updateTick}
+				onRetry={handleRetry}
+				{cardBusyId}
+				onCardPreview={handleCardPreview}
+				onCardApprove={handleCardApprove}
+				onCardDiscard={handleCardDiscard}
+				onCardUndo={handleCardUndo}
+			/>
 		{/if}
 	</div>
 
@@ -597,12 +769,65 @@
 	/>
 </div>
 
+{#if previewCard}
+	<PreviewOverlay
+		card={previewCard}
+		busy={cardBusyId === previewBubbleId}
+		onApprove={handlePreviewApprove}
+		onDiscard={handlePreviewDiscard}
+		onClose={closePreview}
+	/>
+{/if}
+
+{#if confirmingReset}
+	<ConfirmDialog
+		title="Borrar conversación"
+		message="Se va a borrar toda la conversación con este chat. Esta acción no se puede deshacer."
+		confirmLabel={resettingConversation ? 'Borrando…' : 'Sí, borrar'}
+		danger
+		busy={resettingConversation}
+		onConfirm={confirmResetConversation}
+		onCancel={cancelResetConversation}
+	/>
+{/if}
+
+{#if confirmingLogout}
+	<ConfirmDialog
+		title="Cerrar sesión"
+		message="Vas a tener que volver a ingresar tu clave para entrar de nuevo al panel."
+		confirmLabel="Cerrar sesión"
+		onConfirm={confirmLogout}
+		onCancel={cancelLogout}
+	/>
+{/if}
+
 <style>
 	.chat-shell {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
+		position: relative;
+	}
+
+	.page-drop-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 50;
+		background: color-mix(in srgb, var(--color-lime) 22%, white 60%);
+		border: 3px dashed var(--color-ink);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+	.page-drop-message {
+		font-weight: 700;
+		font-size: 1.1rem;
+		color: var(--color-ink);
+		background: white;
+		padding: 0.7rem 1.2rem;
+		border-radius: 0.8rem;
 	}
 
 	.chat-topbar {
@@ -642,19 +867,6 @@
 	}
 	.ghost:disabled {
 		opacity: 0.45;
-	}
-	.danger {
-		background: crimson;
-		color: white;
-		border: 1px solid crimson;
-		border-radius: 0.5rem;
-		padding: 0.4rem 0.7rem;
-		font-size: 0.8rem;
-		min-height: 44px;
-	}
-	.confirm-text {
-		font-size: 0.78rem;
-		color: var(--color-muted, #666);
 	}
 
 	.chat-body {

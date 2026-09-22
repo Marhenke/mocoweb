@@ -17,9 +17,14 @@
  * unrelated pending changes have started accumulating.
  */
 
+import { eq } from 'drizzle-orm';
+import { db } from '$lib/server/cms/db/client';
+import { entries } from '$lib/server/cms/db/schema';
 import { requireAuth } from '$lib/server/cms/auth/require-auth';
 import { getConversationForClient, getMessageById, setChangeCard } from '$lib/server/cms/chat/store';
 import { restorePublishedSnapshot } from '$lib/server/cms/mcp/tools/publish';
+import { getCollection } from '$lib/server/cms/mcp/collections';
+import { resolveEntry } from '$lib/server/cms/mcp/entry-store';
 import type { ChangeCard } from '$lib/server/cms/chat/change-card';
 import type { RequestHandler } from './$types';
 
@@ -69,7 +74,39 @@ export const POST: RequestHandler = async ({ request }) => {
 			slug: entryCard.slug,
 			snapshot: entryCard.approvedSnapshot
 		});
-		if (!outcome.ok) errors.push(outcome.message);
+		if (!outcome.ok) {
+			errors.push(outcome.message);
+			continue;
+		}
+		// Also reset the DRAFT back to what's live again — without this, the
+		// approved edit stays sitting in `data` even though it's no longer
+		// live, invisible (not part of any pending set, no card pointing at
+		// it), and would silently resurface — e.g. through a preview link
+		// for an unrelated change on the same page, or the next time this
+		// exact entry happens to be touched again. "Deshacer" should mean
+		// "as if this was never approved," not just "hide it from
+		// production." Mirrors `routes/api/chat/discard`'s own "draft back
+		// to live" logic; skipped for an entry that had never been
+		// published before THIS approval (`publishedData` was null in the
+		// snapshot) — there is no live state to revert the draft to, and
+		// deleting someone's freshly-written content on an Undo would be a
+		// much more aggressive, surprising action than restoring text.
+		if (entryCard.approvedSnapshot.publishedData !== null) {
+			const collection = getCollection(entryCard.collection);
+			if (collection) {
+				const row = await resolveEntry(collection, { slug: entryCard.slug ?? undefined });
+				if (row) {
+					await db
+						.update(entries)
+						.set({
+							data: entryCard.approvedSnapshot.publishedData,
+							pendingDelete: false,
+							updatedAt: new Date()
+						})
+						.where(eq(entries.id, row.id));
+				}
+			}
+		}
 	}
 
 	if (errors.length > 0) {

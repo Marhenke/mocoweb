@@ -165,10 +165,26 @@ function diffFields(
 				images.push(...galleryImgs.slice(0, 6));
 				continue;
 			}
-			// A non-gallery array/object field that changed but isn't
-			// media-shaped (e.g. a services array) — summarize rather than
-			// dump raw JSON at a non-technical reader.
-			fields.push({ label: humanizeFieldKey(key), before: before ? '(antes)' : '', after: '(cambió)' });
+			// A simple array of strings (e.g. `headlineLines`, `marqueeItems`)
+			// reads fine joined as text — this is the common case for
+			// site-copy fields that happen to be modeled as an array for
+			// layout reasons, not "structured data" a non-technical reader
+			// would find confusing.
+			const isStringArray = (v: unknown): v is string[] =>
+				Array.isArray(v) && v.every((x) => typeof x === 'string');
+			if (isStringArray(a) && (before === null || isStringArray(b))) {
+				fields.push({
+					label: humanizeFieldKey(key),
+					before: isStringArray(b) ? b.join(' / ') : '',
+					after: a.join(' / ')
+				});
+				continue;
+			}
+			// A structured array/object field that changed but isn't
+			// media-shaped and isn't simple strings either (e.g. a services
+			// list of {title, description}) — summarize rather than dump raw
+			// JSON at a non-technical reader.
+			fields.push({ label: humanizeFieldKey(key), before: before ? '(como estaba)' : '', after: '(cambió)' });
 			continue;
 		}
 		if (typeof a === 'string' || typeof b === 'string' || Array.isArray(a) === false) {
@@ -187,6 +203,19 @@ function diffFields(
 // Building one entry's card section
 // ---------------------------------------------------------------------------
 
+/** Human page names (Moco-specific, same spirit as `FIELD_LABELS` above) — never the raw route pattern shown to the person, only used internally as a fallback key. */
+const PAGE_LABELS: Record<string, string> = {
+	'/': 'Inicio',
+	'/estudio': 'Estudio',
+	'/contacto': 'Contacto',
+	'/trabajos': 'Trabajos',
+	'/trabajos/{slug}': 'la página del proyecto'
+};
+
+function pageLabel(pattern: string): string {
+	return PAGE_LABELS[pattern] ?? pattern;
+}
+
 async function buildPages(origin: string, collectionKey: string, slug: string | null): Promise<ChangeCardPage[]> {
 	const token = signPreviewToken();
 	const routes = routesForCollection(collectionKey);
@@ -196,18 +225,34 @@ async function buildPages(origin: string, collectionKey: string, slug: string | 
 		const path = route.dynamic ? route.pattern.replace('{slug}', slug as string) : route.pattern;
 		out.push({
 			pattern: route.pattern,
-			label: route.pattern === '/' ? 'Inicio' : route.pattern,
+			label: pageLabel(route.pattern),
 			previewUrl: `${origin}${path}?${PREVIEW_QUERY_PARAM}=${token}`
 		});
 	}
 	return out;
 }
 
-function entryLabel(row: EntryRow, collectionKey: string): string {
+/** Human names for singleton collections (Moco-specific) — a singleton's one entry has no title-like field of its own to fall back to (see the general fallback below), so these are hand-picked to match how the owner sees each section. Never the raw collection key. */
+const SINGLETON_LABELS: Record<string, string> = {
+	homeHero: 'El inicio',
+	statement: 'La frase destacada del inicio',
+	homeServices: 'La sección de servicios del inicio',
+	estudioHero: 'El encabezado de Estudio',
+	estudioServices: 'Los servicios de Estudio',
+	contactoHero: 'El encabezado de Contacto',
+	contactCta: 'El cartel de contacto',
+	trabajosHeader: 'El encabezado de Trabajos'
+};
+
+function entryLabel(row: EntryRow, collectionKey: string, pages: ChangeCardPage[]): string {
 	const data = row.data as Record<string, unknown> | null;
 	const candidate = data && (data.title ?? data.name ?? data.headline);
 	if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-	return collectionKey === row.collectionKey && row.slug === 'default' ? collectionKey : row.slug;
+	if (row.slug !== 'default') return row.slug;
+	// A singleton with no title-like field — never fall back to the raw
+	// collection key (see this lane's brief: no internal names shown to the
+	// person). Prefer a hand-picked human name, then the page it lives on.
+	return SINGLETON_LABELS[collectionKey] ?? (pages[0] ? pages[0].label : 'esta sección');
 }
 
 /**
@@ -233,7 +278,7 @@ export async function buildChangeCardEntry(
 	return {
 		collection: ref.collection,
 		slug: collection.kind === 'singleton' ? null : row.slug,
-		label: entryLabel(row, ref.collection),
+		label: entryLabel(row, ref.collection, pages),
 		isNew: row.publishedData === null && !row.pendingDelete,
 		isDeletion: row.pendingDelete,
 		fields,
