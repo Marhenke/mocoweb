@@ -17,7 +17,8 @@
 	import EmptyState from './EmptyState.svelte';
 	import { streamChat, isAbortError } from './sse';
 	import { toolActivityLabelFallback } from './tool-labels';
-	import type { ChatBubble, ToolActivity, PendingAttachment } from './types';
+	import PreviewOverlay from './PreviewOverlay.svelte';
+	import type { ChatBubble, ToolActivity, PendingAttachment, ChangeCard } from './types';
 
 	interface ContentBlock {
 		type: string;
@@ -35,6 +36,7 @@
 		content: ContentBlock[];
 		budgetBlocked: boolean;
 		stopped: boolean;
+		changeCard: ChangeCard | null;
 		createdAt: string;
 	}
 
@@ -58,11 +60,18 @@
 	let loadingHistory = $state(true);
 	let confirmingReset = $state(false);
 	let resettingConversation = $state(false);
+	// Lane B7 — preview-approval state. `cardBusyId` is the bubble id whose
+	// Aprobar/Descartar/Deshacer is currently in flight (disables that
+	// card's buttons only, not the whole chat). `previewBubbleId`/
+	// `previewCard` drive the full-screen overlay.
+	let cardBusyId = $state<string | null>(null);
+	let previewBubbleId = $state<string | null>(null);
+	let previewCard = $state<ChangeCard | null>(null);
 
 	let conversationId: string | null = null;
 	let currentAbort: AbortController | null = null;
 	let liveBubbleId: string | null = null;
-	let retryPayloads: Record<string, { text: string; files: File[] }> = {};
+	let retryPayloads: Record<string, { text: string; attachments: PendingAttachment[] }> = {};
 	let liveAnnounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function tempId(): string {
@@ -112,7 +121,7 @@
 			for (const t of toolUses) {
 				nextTools[t.id] = { id: t.id, name: t.name, label: toolActivityLabelFallback(t.name), status: 'running' };
 			}
-			if (!text && images.length === 0 && toolUses.length === 0) continue;
+			if (!text && images.length === 0 && toolUses.length === 0 && !row.changeCard) continue;
 			out.push({
 				id: row.id,
 				role: row.role,
@@ -124,7 +133,8 @@
 				createdAt: row.createdAt,
 				streaming: false,
 				pending: false,
-				failed: false
+				failed: false,
+				changeCard: row.changeCard ?? null
 			});
 		}
 		tools = { ...tools, ...nextTools };
@@ -177,7 +187,8 @@
 			createdAt: new Date().toISOString(),
 			streaming: true,
 			pending: false,
-			failed: false
+			failed: false,
+			changeCard: null
 		};
 		liveBubbleId = b.id;
 		bubbles = [...bubbles, b];
@@ -204,7 +215,14 @@
 		}, 900);
 	}
 
-	function finalizeLiveBubble(row: { id: string; content: ContentBlock[]; budgetBlocked: boolean; stopped: boolean; createdAt: string }): void {
+	function finalizeLiveBubble(row: {
+		id: string;
+		content: ContentBlock[];
+		budgetBlocked: boolean;
+		stopped: boolean;
+		changeCard?: ChangeCard | null;
+		createdAt: string;
+	}): void {
 		const { text, images, toolUses } = blockFields(row.content);
 		for (const t of toolUses) {
 			if (!tools[t.id]) tools = { ...tools, [t.id]: { id: t.id, name: t.name, label: toolActivityLabelFallback(t.name), status: 'running' } };
@@ -219,10 +237,49 @@
 			budgetBlocked: row.budgetBlocked,
 			stopped: row.stopped,
 			createdAt: row.createdAt,
-			streaming: false
+			streaming: false,
+			changeCard: row.changeCard ?? b.changeCard
 		};
 		bubbles = bubbles.map((x) => (x.id === b.id ? merged : x));
 		liveBubbleId = null;
+	}
+
+	/** Lane B7 — the `change_card` SSE event: relocates the card to `row`'s bubble (creating it if the turn produced no text, which shouldn't normally happen but is handled defensively) and clears it off whatever bubble previously showed it, if that bubble is currently in view. */
+	function applyChangeCardEvent(row: StoredRow, previousCardMessageId: string | null): void {
+		let found = false;
+		bubbles = bubbles.map((b) => {
+			if (previousCardMessageId && b.id === previousCardMessageId) return { ...b, changeCard: null };
+			if (b.id === row.id) {
+				found = true;
+				return { ...b, changeCard: row.changeCard };
+			}
+			return b;
+		});
+		if (!found) {
+			// The row's own bubble doesn't exist yet in this session's list
+			// (shouldn't happen — `assistant_message`/`stopped` always fires
+			// first — but never silently drop the card over ordering).
+			const { text, images } = blockFields(row.content);
+			bubbles = [
+				...bubbles,
+				{
+					id: row.id,
+					role: 'assistant',
+					text,
+					toolIds: [],
+					images,
+					budgetBlocked: row.budgetBlocked,
+					stopped: row.stopped,
+					createdAt: row.createdAt,
+					streaming: false,
+					pending: false,
+					failed: false,
+					changeCard: row.changeCard
+				}
+			];
+		}
+		// Keep the preview overlay (if open) showing the freshest card data.
+		if (previewBubbleId === row.id) previewCard = row.changeCard;
 	}
 
 	function resetLiveAnnounceTimer(): void {
@@ -232,11 +289,26 @@
 		}
 	}
 
-	async function runTurn(text: string, attachmentFiles: File[]): Promise<void> {
+	// Lane B7 fix: this used to read `pendingAttachments` (component-level
+	// state) directly for the optimistic preview thumbnail and the
+	// per-file "uploading" status — but every caller already clears
+	// `pendingAttachments = []` BEFORE calling this function (so the
+	// composer visually empties immediately on send), so both reads always
+	// saw an empty array. The sent message showed no thumbnail at all in
+	// the optimistic bubble, and — because the same broken read also fed
+	// what got persisted to `retryPayloads`/shown after the `user_message`
+	// SSE event in the *usual* case still worked (that path re-derives
+	// images from the server's own row), the bug was easy to miss outside
+	// of the split-second before the server confirms — but a slow
+	// connection, or reading the code, made it obvious. Fix: the caller
+	// hands over its own snapshot of the attachments (taken before
+	// clearing `pendingAttachments`) instead of this function reading
+	// shared state that's already moved on.
+	async function runTurn(text: string, attachments: PendingAttachment[]): Promise<void> {
 		const userTempId = tempId();
-		retryPayloads[userTempId] = { text, files: attachmentFiles };
+		retryPayloads[userTempId] = { text, attachments };
 
-		const previewImages = pendingAttachments
+		const previewImages = attachments
 			.filter((a) => a.previewUrl)
 			.map((a) => ({ url: a.previewUrl as string, alt: a.file.name }));
 
@@ -253,7 +325,8 @@
 				createdAt: new Date().toISOString(),
 				streaming: false,
 				pending: true,
-				failed: false
+				failed: false,
+				changeCard: null
 			}
 		];
 
@@ -273,14 +346,16 @@
 			}
 
 			const attachmentsPayload = await Promise.all(
-				attachmentFiles.map(async (file, i) => {
-					const match = pendingAttachments[i];
-					if (match) match.status = 'uploading';
-					pendingAttachments = [...pendingAttachments];
+				attachments.map(async (a) => {
+					// Mutating the snapshot object directly (not the — already
+					// cleared — `pendingAttachments` state) is enough: nothing else
+					// reads this attachment's `status` after send, this is purely
+					// informational for anyone inspecting the snapshot mid-flight.
+					a.status = 'uploading';
 					return {
-						filename: file.name,
-						mime: file.type || 'application/octet-stream',
-						dataBase64: await fileToBase64(file)
+						filename: a.file.name,
+						mime: a.file.type || 'application/octet-stream',
+						dataBase64: await fileToBase64(a.file)
 					};
 				})
 			);
@@ -406,12 +481,11 @@
 	async function handleSend(): Promise<void> {
 		if (sending) return;
 		const text = chatInput.trim();
-		const files = pendingAttachments.map((a) => a.file);
-		if (!text && files.length === 0) return;
+		if (!text && pendingAttachments.length === 0) return;
 		chatInput = '';
 		const attachmentsSnapshot = pendingAttachments;
 		pendingAttachments = [];
-		await runTurn(text, files);
+		await runTurn(text, attachmentsSnapshot);
 		for (const a of attachmentsSnapshot) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
 	}
 
@@ -420,7 +494,15 @@
 		if (!payload) return;
 		bubbles = bubbles.filter((b) => b.id !== bubble.id);
 		delete retryPayloads[bubble.id];
-		void runTurn(payload.text, payload.files);
+		// The snapshot's preview URLs were already revoked after the failed
+		// send (see `handleSend`) — regenerate fresh ones from the still-valid
+		// `File` objects so the retried optimistic bubble shows a thumbnail too.
+		const attachments = payload.attachments.map((a) => ({
+			...a,
+			previewUrl: a.file.type.startsWith('image/') ? URL.createObjectURL(a.file) : null,
+			status: 'ready' as const
+		}));
+		void runTurn(payload.text, attachments);
 	}
 
 	function handlePickSuggestion(text: string): void {

@@ -34,8 +34,64 @@ import { toAnthropicTools, runTool, toolActivityLabel } from './tools-bridge';
 import { buildSystemPrompt } from './system-prompt';
 import { computeCostUsd } from './pricing';
 import { checkBudget, budgetExceededMessage, providerLimitExceededMessage } from './budget';
-import { appendMessage, listMessages, toMessageParam, type ChatMessageRow } from './store';
+import { appendMessage, listMessages, setChangeCard, toMessageParam, type ChatMessageRow } from './store';
+import { addPendingEntries, getPendingChange, relocateCard } from './pending-changes';
+import { buildChangeCard, type PendingEntryRef } from './change-card';
 import type { ToolContext } from '../mcp/types';
+
+/**
+ * Lane B7 — pulls a `{collection, slug}` ref out of a successful
+ * create_entry/update_entry/delete_entry result, so the entry it touched
+ * can be added to the conversation's pending change set (see
+ * `pending-changes.ts`). Returns null for anything that isn't one of those
+ * three tools, that errored, or — for delete_entry specifically — that
+ * deleted a NEVER-published entry outright (there is nothing left to
+ * preview/approve/publish for a row that no longer exists; see
+ * `entries.ts`'s delete_entry doc comment for the two different shapes it
+ * can return). Reads `structuredContent` (the object `textResult` attaches
+ * for any non-string result — see `mcp/types.ts`), not the human `content`
+ * text, which `tools-bridge.ts`'s `wrapUntrusted` prefixes with the
+ * untrusted-data marker.
+ */
+function extractTouchedRef(name: string, structuredContent: unknown): PendingEntryRef | null {
+	if (name !== 'create_entry' && name !== 'update_entry' && name !== 'delete_entry') return null;
+	if (!structuredContent || typeof structuredContent !== 'object') return null;
+	const obj = structuredContent as Record<string, unknown>;
+	const entryLike =
+		obj.entry && typeof obj.entry === 'object' ? (obj.entry as Record<string, unknown>) : obj;
+	const collection = entryLike.collection;
+	const slug = entryLike.slug;
+	if (typeof collection !== 'string') return null;
+	if (typeof slug !== 'string' && slug !== undefined && slug !== null) return null;
+	return { collection, slug: typeof slug === 'string' ? slug : null };
+}
+
+/**
+ * Builds/updates the ONE change card for whatever this turn (and any prior
+ * still-unapproved turn) has touched, and attaches it to `targetRow` —
+ * called right before every point `runChatTurnStream` returns with a real
+ * persisted final row (normal completion, Stop, the max-iterations notice).
+ * A no-op (returns null) when nothing is pending, so a turn that didn't
+ * touch content never grows an empty card. See `change-card.ts` /
+ * `pending-changes.ts` for what this actually builds and stores.
+ */
+async function attachChangeCard(params: {
+	conversationId: string;
+	origin: string;
+	touchedThisTurn: PendingEntryRef[];
+	targetRow: ChatMessageRow;
+}): Promise<{ row: ChatMessageRow; previousCardMessageId: string | null } | null> {
+	const before = await getPendingChange(params.conversationId);
+	const merged = await addPendingEntries(params.conversationId, params.touchedThisTurn);
+	if (merged.length === 0) return null;
+	const card = await buildChangeCard(params.origin, merged);
+	const previousCardMessageId =
+		before?.cardMessageId && before.cardMessageId !== params.targetRow.id ? before.cardMessageId : null;
+	await relocateCard(params.conversationId, merged, params.targetRow.id);
+	const updated = await setChangeCard(params.targetRow.id, card);
+	if (!updated) return null;
+	return { row: updated, previousCardMessageId };
+}
 
 // Hard ceiling on model round-trips within a single user turn. This is a
 // runaway-loop guard, independent of the monthly dollar budget (which is
@@ -90,7 +146,8 @@ export type AgentStreamEvent =
 	| { kind: 'tool_start'; id: string; name: string; label: string }
 	| { kind: 'tool_result'; id: string; name: string; isError: boolean }
 	| { kind: 'assistant_message'; row: ChatMessageRow }
-	| { kind: 'stopped'; row: ChatMessageRow };
+	| { kind: 'stopped'; row: ChatMessageRow }
+	| { kind: 'change_card'; row: ChatMessageRow; previousCardMessageId: string | null };
 
 interface StreamedBlock {
 	type: string;
@@ -203,6 +260,21 @@ export async function runChatTurnStream(params: {
 }): Promise<RunTurnResult> {
 	const newRows: ChatMessageRow[] = [];
 	const emit = params.onEvent;
+	// Lane B7 — every entry touched by a successful create_entry/
+	// update_entry/delete_entry call THIS turn (can be more than one round
+	// of tool calls) — merged into the conversation's pending change set
+	// and turned into a change card right before this function returns. See
+	// `attachChangeCard` above and its call sites below.
+	const touchedThisTurn: PendingEntryRef[] = [];
+	async function finalizeCard(targetRow: ChatMessageRow): Promise<void> {
+		const result = await attachChangeCard({
+			conversationId: params.conversationId,
+			origin: params.ctx.origin,
+			touchedThisTurn,
+			targetRow
+		});
+		if (result) emit({ kind: 'change_card', row: result.row, previousCardMessageId: result.previousCardMessageId });
+	}
 
 	const initialBudget = await checkBudget();
 	const userRow = await appendMessage({
@@ -243,6 +315,7 @@ export async function runChatTurnStream(params: {
 			});
 			newRows.push(row);
 			emit({ kind: 'stopped', row });
+			await finalizeCard(row);
 			return { assistantText: text, newRows, budgetBlocked: false };
 		}
 
@@ -323,6 +396,7 @@ export async function runChatTurnStream(params: {
 				});
 				newRows.push(row);
 				emit({ kind: 'stopped', row });
+				await finalizeCard(row);
 				return { assistantText: textOnly(blocks), newRows, budgetBlocked: false };
 			}
 			if (err instanceof MissingApiKeyError) throw err;
@@ -372,6 +446,7 @@ export async function runChatTurnStream(params: {
 		messages.push({ role: 'assistant', content });
 
 		if (stopReason !== 'tool_use') {
+			await finalizeCard(assistantRow);
 			return { assistantText: extractText(content), newRows, budgetBlocked: false };
 		}
 
@@ -387,6 +462,14 @@ export async function runChatTurnStream(params: {
 				content: text,
 				is_error: outcome.result.isError ?? false
 			});
+			// Lane B7 — track what this call touched for the change card, see
+			// `extractTouchedRef` above. Only ever reads `structuredContent`
+			// (never the untrusted-wrapped text), and only for a call that
+			// actually succeeded.
+			if (!outcome.result.isError) {
+				const ref = extractTouchedRef(outcome.name, outcome.result.structuredContent);
+				if (ref) touchedThisTurn.push(ref);
+			}
 		}
 		const toolResultRow = await appendMessage({
 			conversationId: params.conversationId,
@@ -406,5 +489,6 @@ export async function runChatTurnStream(params: {
 	});
 	newRows.push(noticeRow);
 	emit({ kind: 'assistant_message', row: noticeRow });
+	await finalizeCard(noticeRow);
 	return { assistantText: notice, newRows, budgetBlocked: false };
 }

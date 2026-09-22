@@ -305,6 +305,19 @@ export const chatConversations = pgTable(
 			.references(() => oauthClients.clientId, { onDelete: 'cascade' }),
 		/** Short label for a conversation list, derived from its first user message. Never re-derived after creation. */
 		title: text('title'),
+		/**
+		 * Lane B7 — the site's one accumulating "pending change set": which
+		 * draft entries the panel agent has touched since the last
+		 * Aprobar/Descartar, plus which `chat_messages` row currently shows
+		 * the change card for it (so a later turn UPDATES that same card —
+		 * see `chat/pending-changes.ts` — instead of stacking a new one).
+		 * Null when there is nothing pending. Shape:
+		 * `{ cardMessageId: string, entries: { collection: string, slug: string | null }[] }`.
+		 * Survives a reload by construction (it's just a column read back on
+		 * GET, same as everything else here) — there is no separate
+		 * "session" concept for it.
+		 */
+		pendingChange: jsonb('pending_change'),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
 	},
@@ -359,6 +372,19 @@ export const chatMessages = pgTable(
 		 * next turn's history is always a valid replay for the Anthropic API.
 		 */
 		stopped: boolean('stopped').notNull().default(false),
+		/**
+		 * Lane B7 — the "approve this preview" card, when this assistant row
+		 * is the one currently showing it (null on every other row). NEVER
+		 * included in what `toMessageParam` sends back to the model (see
+		 * `chat/store.ts`) — this is UI/approval metadata the panel renders,
+		 * not a real Anthropic content block, and mixing it into `content`
+		 * would break replaying history to the Messages API. Built and kept
+		 * up to date by `chat/change-card.ts`/`chat/pending-changes.ts`, read
+		 * by `routes/api/chat/+server.ts` (GET, and the SSE `change_card`
+		 * event) and the three approve/discard/undo endpoints under
+		 * `routes/api/chat/`.
+		 */
+		changeCard: jsonb('change_card'),
 		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 	},
 	(table) => [

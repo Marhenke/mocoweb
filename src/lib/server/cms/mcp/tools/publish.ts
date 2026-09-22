@@ -560,6 +560,73 @@ export const previewUrlTool: ToolDefinition = {
 	}
 };
 
+// ---------------------------------------------------------------------------
+// restorePublishedSnapshot — Lane B7, "Deshacer" on an approved change card
+// ---------------------------------------------------------------------------
+
+/**
+ * Restores one entry's LIVE state (`publishedData`/`publishedPosition`/
+ * `status`) to exactly a prior snapshot — the server-side action behind
+ * "Deshacer" on a published change card (`routes/api/chat/undo`). Deliberately
+ * NOT a tool (nothing here is registered in `ToolDefinition`/`allTools`,
+ * unlike every other export in this file): the brief for that lane is
+ * explicit that approve/discard/undo are actions the PANEL TOKEN takes
+ * directly, authenticated the same way any other endpoint is, never
+ * something the chat model can call — see `chat/tools-bridge.ts`'s header
+ * for why `publish`/`unpublish` themselves are excluded from what the model
+ * can call, which is the same reasoning applied one level further here:
+ * undo is even more clearly an action with no legitimate model-initiated
+ * use case.
+ *
+ * Reuses `publishOrRollback` (this file's own render-validate-or-compensate
+ * helper, already used by every tool above) so an undo that would leave a
+ * route unable to render gets refused and rolled back to what was live a
+ * moment ago — exactly the same safety property `publish` itself has, not a
+ * weaker one just because this path doesn't go through the tool registry.
+ */
+export async function restorePublishedSnapshot(params: {
+	collectionKey: string;
+	slug: string | null;
+	snapshot: { publishedData: unknown; publishedPosition: number | null; status: string };
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+	const collection = getCollection(params.collectionKey);
+	if (!collection) return { ok: false, message: collectionNotFoundMessage(params.collectionKey) };
+	const row = await resolveEntry(collection, { slug: params.slug ?? undefined });
+	if (!row) {
+		return {
+			ok: false,
+			message: `No entry found in collection "${params.collectionKey}" for slug "${params.slug ?? SINGLETON_SLUG}".`
+		};
+	}
+	const currentSnapshot = {
+		publishedData: row.publishedData,
+		publishedPosition: row.publishedPosition,
+		status: row.status
+	};
+	await db
+		.update(entries)
+		.set({
+			publishedData: params.snapshot.publishedData,
+			publishedPosition: params.snapshot.publishedPosition,
+			status: params.snapshot.status,
+			updatedAt: new Date()
+		})
+		.where(eq(entries.id, row.id));
+
+	const outcome = await publishOrRollback(
+		params.collectionKey,
+		params.slug ? { changedSlug: params.slug } : {},
+		async () => {
+			await db
+				.update(entries)
+				.set({ ...currentSnapshot, updatedAt: new Date() })
+				.where(eq(entries.id, row.id));
+		}
+	);
+	if (!outcome.ok) return { ok: false, message: outcome.message };
+	return { ok: true };
+}
+
 export const publishTools: ToolDefinition[] = [
 	publishTool,
 	unpublishTool,

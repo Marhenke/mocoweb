@@ -76,6 +76,7 @@ function serializeRow(row: ChatMessageRow) {
 		costUsd: row.costUsd,
 		budgetBlocked: row.budgetBlocked,
 		stopped: row.stopped,
+		changeCard: row.changeCard,
 		createdAt: row.createdAt.toISOString()
 	};
 }
@@ -115,8 +116,47 @@ export const POST: RequestHandler = async ({ request }) => {
 	let body: unknown;
 	try {
 		body = await request.json();
-	} catch {
-		return Response.json({ error: 'invalid_request', error_description: 'Body must be JSON.' }, { status: 400 });
+	} catch (err) {
+		// `request.json()` reads the underlying body stream, which is where
+		// SvelteKit itself enforces `BODY_SIZE_LIMIT` (see
+		// `@sveltejs/kit`'s `get_raw_body` / `@sveltejs/adapter-node`'s own
+		// copy of it) — a request over that limit throws a `SvelteKitError`
+		// with `.status === 413` from RIGHT HERE, not from a separate code
+		// path. A base64-encoded photo is ~33% bigger than the file itself
+		// plus JSON overhead, so this is the realistic failure mode for a
+		// real photo attachment, not a hypothetical: verified locally by
+		// posting a 700KB attachment against a production build with the
+		// default 512K adapter-node limit and observing exactly this catch
+		// fire. Previously this branch always answered the same generic,
+		// English, misleading "Body must be JSON." regardless of cause —
+		// the bug this lane's brief opens with. Distinguish the real cause
+		// and answer in friendly Spanish either way; never the raw
+		// exception text (see this file's header on error handling).
+		const status = (err as { status?: number } | null)?.status;
+		if (status === 413) {
+			return Response.json(
+				{
+					error: 'payload_too_large',
+					error_description:
+						'La imagen (o el conjunto de archivos) pesa demasiado para enviarla de una. Probá con una ' +
+						'imagen más liviana, o mandalas de a una por mensaje.'
+				},
+				{ status: 413 }
+			);
+		}
+		console.error(
+			JSON.stringify({
+				at: 'api/chat:POST:parse-body',
+				error: err instanceof Error ? (err.stack ?? err.message) : String(err)
+			})
+		);
+		return Response.json(
+			{
+				error: 'invalid_request',
+				error_description: 'No se pudo leer el mensaje enviado. Probá de nuevo.'
+			},
+			{ status: 400 }
+		);
 	}
 	if (typeof body !== 'object' || body === null) {
 		return Response.json({ error: 'invalid_request', error_description: 'Body must be a JSON object.' }, { status: 400 });
@@ -148,8 +188,25 @@ export const POST: RequestHandler = async ({ request }) => {
 			uploaded.push(result);
 		}
 	} catch (err) {
-		const description = err instanceof Error ? err.message : String(err);
-		return Response.json({ error: 'upload_failed', error_description: description }, { status: 502 });
+		// Never the raw `err.message` here (it's an internal, English,
+		// developer-facing string, e.g. an S3/SeaweedFS client error) — log
+		// it server-side and show a friendly Spanish message instead. See
+		// this file's header ("No raw server error may ever reach the
+		// chat").
+		console.error(
+			JSON.stringify({
+				at: 'api/chat:POST:upload',
+				error: err instanceof Error ? (err.stack ?? err.message) : String(err)
+			})
+		);
+		return Response.json(
+			{
+				error: 'upload_failed',
+				error_description:
+					'No se pudo subir la imagen. Probá de nuevo en un momento; si sigue pasando, avisale a quien administra el sitio.'
+			},
+			{ status: 502 }
+		);
 	}
 
 	const userContent: AnthropicContentBlock[] = [];
@@ -240,6 +297,14 @@ export const POST: RequestHandler = async ({ request }) => {
 								break;
 							case 'stopped':
 								safeEnqueue(sseFrame('stopped', { row: serializeRow(event.row) }));
+								break;
+							case 'change_card':
+								safeEnqueue(
+									sseFrame('change_card', {
+										row: serializeRow(event.row),
+										previousCardMessageId: event.previousCardMessageId
+									})
+								);
 								break;
 						}
 					}

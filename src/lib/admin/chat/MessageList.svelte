@@ -31,8 +31,25 @@
 		liveAnnouncement: string;
 		updateTick: number;
 		onRetry: (bubble: ChatBubble) => void;
+		cardBusyId: string | null;
+		onCardPreview: (bubble: ChatBubble) => void;
+		onCardApprove: (bubble: ChatBubble) => void;
+		onCardDiscard: (bubble: ChatBubble) => void;
+		onCardUndo: (bubble: ChatBubble) => void;
 	}
-	let { bubbles, tools, showTyping, liveAnnouncement, updateTick, onRetry }: Props = $props();
+	let {
+		bubbles,
+		tools,
+		showTyping,
+		liveAnnouncement,
+		updateTick,
+		onRetry,
+		cardBusyId,
+		onCardPreview,
+		onCardApprove,
+		onCardDiscard,
+		onCardUndo
+	}: Props = $props();
 
 	let scrollEl: HTMLDivElement | undefined = $state();
 	let bottomAnchor: HTMLDivElement | undefined = $state();
@@ -92,7 +109,16 @@
 			{#if day}
 				<div class="day-separator" role="separator"><span>{day}</span></div>
 			{/if}
-			<MessageBubble {bubble} {tools} {onRetry} />
+			<MessageBubble
+				{bubble}
+				{tools}
+				{onRetry}
+				cardBusy={cardBusyId === bubble.id}
+				onCardPreview={() => onCardPreview(bubble)}
+				onCardApprove={() => onCardApprove(bubble)}
+				onCardDiscard={() => onCardDiscard(bubble)}
+				onCardUndo={() => onCardUndo(bubble)}
+			/>
 		{/each}
 		{#if showTyping}
 			<TypingIndicator />

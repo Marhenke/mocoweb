@@ -16,6 +16,37 @@ export interface ToolActivity {
 	status: ToolStatus;
 }
 
+export interface ChangeCardField {
+	label: string;
+	before: string;
+	after: string;
+}
+export interface ChangeCardImage {
+	url: string;
+	alt: string;
+}
+export interface ChangeCardPage {
+	pattern: string;
+	label: string;
+	previewUrl: string | null;
+}
+export interface ChangeCardEntry {
+	collection: string;
+	slug: string | null;
+	label: string;
+	isNew: boolean;
+	isDeletion: boolean;
+	fields: ChangeCardField[];
+	images: ChangeCardImage[];
+	pages: ChangeCardPage[];
+}
+/** Lane B7 — "approve this preview" card. See `$lib/server/cms/chat/change-card.ts` (the server-side twin of this type) for the full design rationale. */
+export interface ChangeCard {
+	status: 'pending' | 'published' | 'discarded' | 'undone';
+	entries: ChangeCardEntry[];
+	publishedAt?: string;
+}
+
 export interface ChatBubble {
 	/** The real row id once known; a client-generated temp id for an optimistic send that hasn't been confirmed yet. */
 	id: string;
@@ -33,6 +64,8 @@ export interface ChatBubble {
 	pending: boolean;
 	/** True if the optimistic send failed outright (network error before any SSE frame arrived) — shows a retry action instead of just sitting there. */
 	failed: boolean;
+	/** Lane B7 — set only on the one assistant row currently showing the pending/published change card, if any. */
+	changeCard: ChangeCard | null;
 }
 
 export interface PendingAttachment {
