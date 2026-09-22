@@ -20,6 +20,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | A9 | Railway: provisioning, deploy, cutover | ✅ entorno preparado, sin deploy (ver `.migration/CUTOVER.md`) |
 | B4 | Formulario de contacto real, analítica propia, scope "inbox" | ✅ verificada (ver sección propia más abajo) |
 | B5 | `/admin`: chat interno como cliente MCP en proceso | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
+| B6 | `/admin`: chat en streaming real (SSE), UX de nivel Claude.ai/ChatGPT | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -496,3 +497,186 @@ contra el registro de tools REAL (nada mockeado del lado de la app). Lo que
 esto prueba: la mecánica del arnés. Lo que NO prueba: que Claude real, dado
 este system prompt, decida por su cuenta no publicar ante una inyección —
 eso queda pendiente de una prueba con clave real.
+
+## Lane B6: el chat de `/admin` en streaming real
+
+Reemplaza el `POST /api/chat` de request/response único (Lane B5) por
+Server-Sent Events de punta a punta: `chat/anthropic-client.ts` agrega
+`callClaudeStream` (parser SSE hecho a mano contra el formato real de
+streaming de la Messages API, verificado contra
+`platform.claude.com/docs/en/api/messages-streaming` mientras se construía
+esta lane, no asumido de memoria — `message_start` → `content_block_start` →
+`content_block_delta` (`text_delta`/`input_json_delta`) → `content_block_stop`
+→ `message_delta` (con `stop_reason` y `usage.output_tokens`) → `message_stop`,
+con `ping` intercalado); `chat/agent.ts` agrega `runChatTurnStream`, que
+reemplaza por completo al loop no-streaming anterior (borrado, no dejado en
+paralelo — ver el propio header de `agent.ts`); `routes/api/chat/+server.ts`
+devuelve `Content-Type: text/event-stream` en vez de un JSON al final. El
+panel (`src/routes/admin/+page.svelte`, ahora solo login/sesión) se separó en
+componentes bajo `src/lib/admin/chat/` (`ChatPanel`, `MessageList`,
+`MessageBubble`, `Composer`, `EmptyState`, `TypingIndicator`, más
+`sse.ts`/`markdown.ts`/`format.ts`/`tool-labels.ts`/`types.ts`).
+
+**Investigación previa** (más allá de la lista base del brief, según lo
+pedido): además del formato de streaming de Anthropic ya mencionado, se
+revisó cómo Claude.ai/ChatGPT y la guía publicada sobre chat interfaces
+manejan (a) el estado "escribiendo" separado del primer token real, (b) que
+un botón de Enviar nunca debe quedar deshabilitado sino cambiar de acción
+(Enviar → Detener), y (c) que una región `aria-live` para contenido que
+streamea debe actualizarse en lotes, no por token — las tres se aplicaron acá
+(`Composer.svelte`, `ChatPanel.svelte`'s `scheduleLiveAnnouncement`).
+
+31. **`request.signal` de SvelteKit NO es "el cliente se desconectó
+    mientras escribíamos la respuesta" — es "el cuerpo de la REQUEST
+    entrante se abortó antes de terminar de leerse".** El primer intento de
+    Detener ató `runChatTurnStream` a `request.signal` (parecía lo obvio:
+    "el fetch del browser se abortó, entonces esta signal debería
+    dispararse"). Probado con `curl --max-time` cortando la conexión a
+    mitad de un streaming largo: `request.signal.aborted` seguía en
+    `false` y el turno completo corría igual del lado del servidor, sin
+    frenarse nunca — el Stop de la UI no detenía nada real. Causa raíz,
+    leída en el código fuente de `@sveltejs/kit`
+    (`exports/node/index.js`, `getRequest`): ese controller solo hace
+    `.abort()` si `(errored || request.destroyed) && !end_emitted` — y
+    para un POST con body JSON chico, `end_emitted` ya es `true` mucho
+    antes de que el cliente se desconecte de la RESPUESTA, así que la
+    condición nunca se cumple. Arreglo real: el `ReadableStream` que este
+    endpoint devuelve define su propio método `cancel()` — el mismo
+    lifecycle hook que `setResponse` (compartido por `vite dev` y
+    `@sveltejs/adapter-node`, mismo archivo) llama vía `reader.cancel()`
+    cuando el `close`/`error` del `ServerResponse` real dispara. `cancel()`
+    aborta un `AbortController` propio de este endpoint, y ESE es el que se
+    pasa a `runChatTurnStream`/`callClaudeStream`. Reproducido y confirmado
+    con el servidor stub (`scripts/stub-anthropic-server.mjs`), que loguea
+    cuando su propio socket de request se cierra antes de tiempo: con el
+    arreglo, cortar la conexión del lado del browser loguea
+    `[stub] client disconnected mid-stream` de inmediato, y la fila
+    persistida en `chat_messages` queda con `stopped: true` y el texto
+    parcial exacto que se había generado hasta ese punto — no el texto
+    completo.
+
+32. **El propio servidor stub tenía el mismo error, en su propia mitad de
+    la conexión.** Escuchar `req.on('close', ...)` (el `IncomingMessage`)
+    en vez de `res.on('close', ...)` (el `ServerResponse`) hace que el
+    callback dispare en TODA request, streaming o no, apenas termina de
+    leerse el body — porque eso es exactamente lo que "close" significa
+    para el objeto de REQUEST, no para la respuesta. Encontrado
+    reproduciendo el mismo síntoma en aislamiento contra el stub solo (sin
+    la app): cada llamada, incluso sin ningún cliente desconectándose
+    nunca, logueaba "client disconnected" y cortaba el stream a los pocos
+    eventos. Mismo arreglo que el defecto #31: escuchar en el objeto de
+    RESPUESTA, no en el de REQUEST.
+
+33. **Un agente automatizado probando "Enter para enviar" contra este panel
+    encontró que la tecla no enviaba — y el bug estaba en la herramienta de
+    prueba, no en la app.** El harness de browser automation de esta sesión
+    soporta nombres de tecla como `"Return"` para otros atajos, pero este
+    frontend (como cualquier browser real) solo reconoce
+    `event.key === 'Enter'` — `"Return"` no dispara ningún evento con ese
+    `key`. Confirmado de dos formas antes de descartarlo como bug de la app:
+    (1) un `KeyboardEvent` con `key: 'Enter'` despachado directo por JS SÍ
+    disparaba el envío correctamente, y (2) usar el nombre de tecla
+    `"Enter"` en vez de `"Return"` en la misma herramienta de automatización
+    también funcionaba. Nunca se tocó `Composer.svelte` para esto —
+    documentado acá porque el patrón ("la automatización de prueba nombra
+    la tecla distinto de como el navegador la nombra") puede repetirse en
+    futuros lanes que prueben atajos de teclado.
+
+34. **La descripción de una imagen adjunta, agregada al mensaje del usuario
+    para que el MODELO la vea (`"[Imagen adjunta por el usuario — YA
+    subida..."`, con key/url/ancho/alto/ratio), se estaba mostrando también
+    a la PERSONA** en su propia burbuja de chat — un bloque de texto
+    interno de plumbing, nunca escrito por el usuario, renderizado igual
+    que si lo hubiera tecleado. Existía desde la Lane B5 (mismo patrón de
+    bloques de contenido, sin este filtro) pero se notó recién acá porque
+    esta lane muestra imágenes inline y quedaba doblemente redundante (la
+    miniatura Y el texto crudo). Arreglo: `ChatPanel.svelte`'s
+    `blockFields` filtra ese bloque de texto especial de lo que se
+    MUESTRA (`ATTACHMENT_DESCRIPTOR_RE`) — la fila guardada en la base, y lo
+    que se reenvía al modelo, no cambia en absoluto.
+
+35. **Una imagen de prueba minúscula (2×2px, usada para probar
+    paste-to-attach sin depender de un archivo real) reveló que
+    `.bubble-img` no tenía un `width` explícito** — solo `max-width:
+    100%`, que no hace crecer una imagen más chica que el contenedor, así
+    que una imagen con pocos píxeles intrínsecos se renderizaba a su
+    tamaño nativo (unos pocos píxeles, invisible en la práctica) en vez de
+    llenar el ancho de la burbuja. Arreglo: `width: 100%; height: auto`
+    además de los límites de `max-width`/`max-height` — una foto real
+    (siempre con más píxeles que el contenedor) se comporta igual que
+    antes; solo cambia el caso de una imagen fuente más chica que su
+    burbuja.
+
+**Contabilidad de presupuesto bajo streaming**: `pricing.ts`/`budget.ts` no
+cambiaron — lo que cambió es CUÁNDO se conoce el uso real de tokens.
+`message_start` trae `input_tokens`; `message_delta` trae `output_tokens`
+FINAL, justo antes de `message_stop`. Si el streaming se corta (Detener, o
+un error a mitad de camino) antes de que ese `message_delta` llegue, no hay
+conteo oficial de tokens de salida — `agent.ts`'s `estimateOutputTokens`
+aproxima desde el texto realmente recibido (≈4 caracteres/token,
+redondeando siempre HACIA ARRIBA) en vez de contarlo como 0, así que Detener
+un turno grande no es una forma de esquivar el presupuesto. Probado con
+`CHAT_MONTHLY_BUDGET_USD=0` tanto por `curl` (viendo los eventos SSE crudos)
+como en un Chrome real: el chat responde el mensaje de presupuesto agotado
+sin intentar streaming en absoluto, con el mismo estilo visual distintivo
+(burbuja color ámbar) que ya tenía en la Lane B5.
+
+**Coherencia tras Detener**: la columna nueva `chat_messages.stopped`
+(migración `drizzle/0004_strong_lenny_balinger.sql`) marca una fila
+asistente parcial. La regla dura, verificada con los tres puntos de corte
+posibles: (1) Detener a mitad de un bloque de texto — se persiste el texto
+parcial tal cual, sin bloques `tool_use`. (2) Detener mientras streamea un
+`tool_use` (JSON de argumentos incompleto) — ese bloque se descarta entero,
+nunca se persiste un `tool_use` con `input` roto. (3) Detener después de que
+un `tool_use` ya se ejecutó y su `tool_result` ya se guardó, pero antes de
+la siguiente llamada al modelo — se deja esa pareja tal cual (ya es
+válida) y el turno simplemente no continúa. En los tres casos, el turno
+SIGUIENTE se probó explícitamente contra el stub y respondió con
+normalidad — nunca un 400 de la API por un `tool_use` sin
+`tool_result` correspondiente en el historial reenviado.
+
+**Servidor Anthropic stub, extendido para streaming**:
+`scripts/stub-anthropic-server.mjs` (nuevo, commiteado — la Lane B5 había
+armado uno ad-hoc, no guardado en el repo) reemplaza `POST /v1/messages` con
+SSE real, contra el registro de tools REAL de la app (nada mockeado del
+lado de la app), con escenarios guionados por palabra clave: estadísticas
+(`query_analytics`), bandeja de entrada (`list_inquiries` — usado para la
+prueba de sanitización, ver abajo), un cambio + publicación de dos pasos
+(`update_entry` → `publish`), una respuesta deliberadamente larga y lenta
+para poder frenarla a mitad de camino con Detener, y una de demostración de
+markdown. `npm run chat:stub` lo levanta; `.env.example` documenta cómo
+apuntar la app hacia él (`ANTHROPIC_BASE_URL=http://localhost:8791` +
+cualquier valor no vacío de `ANTHROPIC_API_KEY`).
+
+**Lo que sigue pendiente de una clave real de Anthropic** (igual que en la
+Lane B5): que un modelo real, no un guion, decida por sí solo no publicar
+ante una inyección, y la calidad/tono real de las respuestas. Todo lo demás
+— streaming byte a byte, actividad de herramientas visible, Detener
+abortando la conexión de verdad, contabilidad de presupuesto, sanitización —
+se probó de punta a punta contra el stub y no depende de qué modelo esté
+del otro lado del `fetch`.
+
+**Evidencia por criterio de aceptación**, resumida (el reporte de esta lane
+tiene el detalle completo con capturas):
+
+- Envío optimista, tipeo visible, streaming token a token, actividad de
+  herramientas ("🔧 Revisando…" → "✓"/"⚠️"), Detener a mitad de generación
+  seguido de un turno normal, timestamps + separador de día ("Hoy"),
+  markdown (negrita/itálica/código/listas/links con `target="_blank"
+  rel="noopener noreferrer"`), adjuntar por drag&drop y por paste con
+  miniatura y quita, botón "Mensajes nuevos ↓" al scrollear hacia arriba,
+  sugerencias del estado vacío — probado en Chrome real (desktop y 375px),
+  con capturas y, donde una captura no alcanza (el layout de mobile), con
+  medición directa del DOM (`getBoundingClientRect`): sin scroll
+  horizontal, 44×44px los botones táctiles, 16px el `font-size` del
+  textarea.
+- **Prueba de sanitización**: una inquiry real enviada por `POST
+  /api/contact` con `<img src=x onerror=alert(1)>` en el mensaje, leída por
+  el chat (`list_inquiries`) y citada textualmente en la respuesta del
+  modelo — el HTML resultante contiene `&lt;img src=x
+  onerror=alert(1)&gt;` (confirmado leyendo `innerHTML` en el navegador
+  real), cero elementos `<img>` nuevos en el DOM, ninguna alerta disparada.
+- Presupuesto agotado (`CHAT_MONTHLY_BUDGET_USD=0`) bloquea el chat sin
+  streaming, en un Chrome real.
+- `verify.sh`, `resilience.sh`, `browser-nav.sh`: PASS. `npm run build`:
+  éxito.
