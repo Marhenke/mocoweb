@@ -18,6 +18,7 @@
 	import { streamChat, isAbortError } from './sse';
 	import { toolActivityLabelFallback } from './tool-labels';
 	import PreviewOverlay from './PreviewOverlay.svelte';
+	import PendingChangeBar from './PendingChangeBar.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import { validateAttachmentFiles } from './attachment-validation';
 	import type { ChatBubble, ToolActivity, PendingAttachment, ChangeCard } from './types';
@@ -38,7 +39,6 @@
 		content: ContentBlock[];
 		budgetBlocked: boolean;
 		stopped: boolean;
-		changeCard: ChangeCard | null;
 		createdAt: string;
 	}
 
@@ -63,13 +63,16 @@
 	let confirmingReset = $state(false);
 	let resettingConversation = $state(false);
 	let confirmingLogout = $state(false);
-	// Lane B7 — preview-approval state. `cardBusyId` is the bubble id whose
-	// Aprobar/Descartar/Deshacer is currently in flight (disables that
-	// card's buttons only, not the whole chat). `previewBubbleId`/
-	// `previewCard` drive the full-screen overlay.
-	let cardBusyId = $state<string | null>(null);
-	let previewBubbleId = $state<string | null>(null);
-	let previewCard = $state<ChangeCard | null>(null);
+	// Lane B7, redesigned in Lane B8 — the site's ONE open change set, as a
+	// persistent pinned bar (`PendingChangeBar.svelte`) — never attached to a
+	// bubble/message anymore (see `pending-changes.ts`'s header on the
+	// server). `openChange` is the single source of truth for what the bar
+	// (and, when open, the full-screen overlay) shows; `actionBusy` disables
+	// Aprobar/Descartar/Deshacer while one of those is in flight;
+	// `previewOpen` toggles the full-screen overlay.
+	let openChange = $state<ChangeCard | null>(null);
+	let actionBusy = $state(false);
+	let previewOpen = $state(false);
 	// Lane B7 — page-wide drag-and-drop (moved here from `Composer.svelte`;
 	// see that component's header). `pageDragDepth` is a plain counter, not
 	// `$state`, because `dragenter`/`dragleave` fire once per DOM boundary
@@ -122,8 +125,11 @@
 			// here only to resolve the PRECEDING assistant row's tool status.
 			if (row.role === 'user' && row.content.length > 0 && row.content.every((b) => b.type === 'tool_result')) {
 				for (const b of row.content) {
+					// Lane B8 — same rule as the live `tool_result` handler above: a
+					// recovered tool error must never render as a failure, even when
+					// rebuilding history after a reload.
 					if (typeof b.tool_use_id === 'string' && nextTools[b.tool_use_id]) {
-						nextTools[b.tool_use_id].status = b.is_error ? 'error' : 'done';
+						nextTools[b.tool_use_id].status = 'done';
 					}
 				}
 				continue;
@@ -132,7 +138,7 @@
 			for (const t of toolUses) {
 				nextTools[t.id] = { id: t.id, name: t.name, label: toolActivityLabelFallback(t.name), status: 'running' };
 			}
-			if (!text && images.length === 0 && toolUses.length === 0 && !row.changeCard) continue;
+			if (!text && images.length === 0 && toolUses.length === 0) continue;
 			out.push({
 				id: row.id,
 				role: row.role,
@@ -144,8 +150,7 @@
 				createdAt: row.createdAt,
 				streaming: false,
 				pending: false,
-				failed: false,
-				changeCard: row.changeCard ?? null
+				failed: false
 			});
 		}
 		tools = { ...tools, ...nextTools };
@@ -157,9 +162,16 @@
 		try {
 			const res = await authedFetch('/api/chat');
 			if (!res.ok) return;
-			const data = (await res.json()) as { conversation: { id: string } | null; messages: StoredRow[] };
+			const data = (await res.json()) as {
+				conversation: { id: string } | null;
+				messages: StoredRow[];
+				pendingChange: ChangeCard | null;
+			};
 			conversationId = data.conversation?.id ?? null;
 			bubbles = rowsToBubbles(data.messages ?? []);
+			// Lane B8 — the persistent pinned bar survives a reload/re-login by
+			// reading the conversation's own state, never a message row.
+			openChange = data.pendingChange ?? null;
 		} finally {
 			loadingHistory = false;
 		}
@@ -198,8 +210,7 @@
 			createdAt: new Date().toISOString(),
 			streaming: true,
 			pending: false,
-			failed: false,
-			changeCard: null
+			failed: false
 		};
 		liveBubbleId = b.id;
 		bubbles = [...bubbles, b];
@@ -231,7 +242,6 @@
 		content: ContentBlock[];
 		budgetBlocked: boolean;
 		stopped: boolean;
-		changeCard?: ChangeCard | null;
 		createdAt: string;
 	}): void {
 		const { text, images, toolUses } = blockFields(row.content);
@@ -248,49 +258,10 @@
 			budgetBlocked: row.budgetBlocked,
 			stopped: row.stopped,
 			createdAt: row.createdAt,
-			streaming: false,
-			changeCard: row.changeCard ?? b.changeCard
+			streaming: false
 		};
 		bubbles = bubbles.map((x) => (x.id === b.id ? merged : x));
 		liveBubbleId = null;
-	}
-
-	/** Lane B7 — the `change_card` SSE event: relocates the card to `row`'s bubble (creating it if the turn produced no text, which shouldn't normally happen but is handled defensively) and clears it off whatever bubble previously showed it, if that bubble is currently in view. */
-	function applyChangeCardEvent(row: StoredRow, previousCardMessageId: string | null): void {
-		let found = false;
-		bubbles = bubbles.map((b) => {
-			if (previousCardMessageId && b.id === previousCardMessageId) return { ...b, changeCard: null };
-			if (b.id === row.id) {
-				found = true;
-				return { ...b, changeCard: row.changeCard };
-			}
-			return b;
-		});
-		if (!found) {
-			// The row's own bubble doesn't exist yet in this session's list
-			// (shouldn't happen — `assistant_message`/`stopped` always fires
-			// first — but never silently drop the card over ordering).
-			const { text, images } = blockFields(row.content);
-			bubbles = [
-				...bubbles,
-				{
-					id: row.id,
-					role: 'assistant',
-					text,
-					toolIds: [],
-					images,
-					budgetBlocked: row.budgetBlocked,
-					stopped: row.stopped,
-					createdAt: row.createdAt,
-					streaming: false,
-					pending: false,
-					failed: false,
-					changeCard: row.changeCard
-				}
-			];
-		}
-		// Keep the preview overlay (if open) showing the freshest card data.
-		if (previewBubbleId === row.id) previewCard = row.changeCard;
 	}
 
 	function resetLiveAnnounceTimer(): void {
@@ -336,8 +307,7 @@
 				createdAt: new Date().toISOString(),
 				streaming: false,
 				pending: true,
-				failed: false,
-				changeCard: null
+				failed: false
 			}
 		];
 
@@ -413,10 +383,20 @@
 						break;
 					}
 					case 'tool_result': {
+						// Lane B8 — a tool call that fails and gets silently retried/
+						// corrected by the agent must never look like a failure to the
+						// owner (see the brief: "internal failures must never reach the
+						// user"). This chip only ever shows work-in-progress → done,
+						// regardless of `isError` — the server still knows the truth
+						// (logged, and used to decide whether the TURN itself ends in
+						// failure), but a single tool round failing is normal agent
+						// self-correction, not something to alarm a non-technical owner
+						// with. A turn that genuinely can't recover surfaces through the
+						// separate `error` SSE event / `chatError` banner below, never
+						// through this chip.
 						const id = d.id as string;
-						const isError = Boolean(d.isError);
 						if (tools[id]) {
-							tools = { ...tools, [id]: { ...tools[id], status: isError ? 'error' : 'done' } };
+							tools = { ...tools, [id]: { ...tools[id], status: 'done' } };
 						}
 						updateTick++;
 						break;
@@ -431,10 +411,15 @@
 						finalizeLiveBubble(row);
 						break;
 					}
-					case 'change_card': {
-						const row = d.row as StoredRow;
-						const previousCardMessageId = (d.previousCardMessageId as string | null) ?? null;
-						applyChangeCardEvent(row, previousCardMessageId);
+					case 'pending_change': {
+						// Lane B8 — no bubble/row involved: the persistent pinned bar
+						// is the single source of truth, updated straight from the
+						// event.
+						openChange = (d.card as ChangeCard | null) ?? null;
+						if (previewOpen) {
+							// Keep the overlay (if open) showing the freshest card data.
+							if (!openChange) previewOpen = false;
+						}
 						break;
 					}
 					case 'done': {
@@ -582,29 +567,15 @@
 		if (ok.length > 0) onFilesAdded(ok);
 	}
 
-	// ── Lane B7: preview-approval actions ────────────────────────────────────
-	// Each endpoint acts on the conversation's CURRENT pending set (approve/
-	// discard) or a specific card by message id (undo — see
-	// `routes/api/chat/undo`'s header for why undo needs the id explicitly).
-	// All three return `{ ok, card, messageId, error_description? }`; the
-	// returned card always replaces whatever that bubble was showing, so the
-	// UI never has to guess the new state itself.
-	function applyCardResult(fallbackBubbleId: string, data: Record<string, unknown>): void {
-		const messageId = (data.messageId as string | undefined) ?? fallbackBubbleId;
-		const card = (data.card as ChangeCard | null | undefined) ?? null;
-		bubbles = bubbles.map((b) => (b.id === messageId ? { ...b, changeCard: card } : b));
-		if (previewBubbleId === messageId) {
-			if (card && (card.status === 'pending' || card.status === 'published')) {
-				// Keep the overlay open: on Aprobar it now shows the page that's
-				// actually live (worth confirming at a glance), just without the
-				// action bar (see `PreviewOverlay.svelte` — only 'pending' gets one).
-				previewCard = card;
-			} else {
-				// Descartar/Deshacer: nothing left to review, close it.
-				previewBubbleId = null;
-				previewCard = null;
-			}
-		}
+	// ── Lane B7, redesigned in Lane B8: change-set actions ────────────────────
+	// Each endpoint acts on the conversation's ONE open change set — never a
+	// specific message anymore (see `routes/api/chat/{approve,discard,undo}`'s
+	// headers). All three return `{ ok, card, errors?, error_description? }`;
+	// the returned card always replaces `openChange` wholesale, so the UI
+	// never has to guess the new state itself.
+	function applyOpenChangeResult(data: Record<string, unknown>): void {
+		openChange = (data.card as ChangeCard | null | undefined) ?? null;
+		if (!openChange) previewOpen = false;
 		const errors = data.errors as string[] | undefined;
 		if (data.ok === false) {
 			chatError =
@@ -617,15 +588,11 @@
 		}
 	}
 
-	async function postCardAction(path: string, bubbleId: string, body?: unknown): Promise<void> {
-		if (cardBusyId) return;
-		cardBusyId = bubbleId;
+	async function postCardAction(path: string): Promise<void> {
+		if (actionBusy) return;
+		actionBusy = true;
 		try {
-			const res = await authedFetch(path, {
-				method: 'POST',
-				headers: body ? { 'content-type': 'application/json' } : undefined,
-				body: body ? JSON.stringify(body) : undefined
-			});
+			const res = await authedFetch(path, { method: 'POST' });
 			let data: Record<string, unknown>;
 			try {
 				data = (await res.json()) as Record<string, unknown>;
@@ -637,37 +604,29 @@
 					(data.error_description as string | undefined) ?? 'No se pudo completar la acción. Probá de nuevo.';
 				return;
 			}
-			applyCardResult(bubbleId, data);
+			applyOpenChangeResult(data);
 		} catch {
 			chatError = 'No se pudo conectar con el servidor. Revisá tu conexión y probá de nuevo.';
 		} finally {
-			cardBusyId = null;
+			actionBusy = false;
 		}
 	}
 
-	function handleCardApprove(bubble: ChatBubble): void {
-		void postCardAction('/api/chat/approve', bubble.id);
+	function handleCardApprove(): void {
+		void postCardAction('/api/chat/approve');
 	}
-	function handleCardDiscard(bubble: ChatBubble): void {
-		void postCardAction('/api/chat/discard', bubble.id);
+	function handleCardDiscard(): void {
+		void postCardAction('/api/chat/discard');
 	}
-	function handleCardUndo(bubble: ChatBubble): void {
-		void postCardAction('/api/chat/undo', bubble.id, { messageId: bubble.id });
+	function handleCardUndo(): void {
+		void postCardAction('/api/chat/undo');
 	}
-	function handleCardPreview(bubble: ChatBubble): void {
-		if (!bubble.changeCard) return;
-		previewBubbleId = bubble.id;
-		previewCard = bubble.changeCard;
+	function handleCardPreview(): void {
+		if (!openChange) return;
+		previewOpen = true;
 	}
 	function closePreview(): void {
-		previewBubbleId = null;
-		previewCard = null;
-	}
-	function handlePreviewApprove(): void {
-		if (previewBubbleId) handleCardApprove({ id: previewBubbleId } as ChatBubble);
-	}
-	function handlePreviewDiscard(): void {
-		if (previewBubbleId) handleCardDiscard({ id: previewBubbleId } as ChatBubble);
+		previewOpen = false;
 	}
 
 	function askResetConversation(): void {
@@ -686,6 +645,11 @@
 			bubbles = [];
 			tools = {};
 			conversationId = null;
+			// "Borrar conversación" deletes the whole conversation row, which is
+			// also where the open change set lives (see `pending-changes.ts`) —
+			// clear it client-side too rather than leaving a stale bar up.
+			openChange = null;
+			previewOpen = false;
 		} catch (err) {
 			chatError = err instanceof Error ? err.message : 'Error desconocido.';
 		} finally {
@@ -745,17 +709,30 @@
 				{liveAnnouncement}
 				{updateTick}
 				onRetry={handleRetry}
-				{cardBusyId}
-				onCardPreview={handleCardPreview}
-				onCardApprove={handleCardApprove}
-				onCardDiscard={handleCardDiscard}
-				onCardUndo={handleCardUndo}
 			/>
 		{/if}
 	</div>
 
 	{#if chatError}
 		<div class="error-box" role="alert">{chatError}</div>
+	{/if}
+
+	<!--
+		Lane B8 — the persistent pinned bar: exactly one, never a message in
+		the thread above. Sits right above the composer so it's visible
+		whenever open work exists, on every screen size, and disappears the
+		instant `openChange` is null (Aprobar-published-and-not-undoable,
+		Descartar, or nothing ever touched).
+	-->
+	{#if openChange}
+		<PendingChangeBar
+			card={openChange}
+			busy={actionBusy}
+			onPreview={handleCardPreview}
+			onApprove={handleCardApprove}
+			onDiscard={handleCardDiscard}
+			onUndo={handleCardUndo}
+		/>
 	{/if}
 
 	<Composer
@@ -769,12 +746,13 @@
 	/>
 </div>
 
-{#if previewCard}
+{#if previewOpen && openChange}
 	<PreviewOverlay
-		card={previewCard}
-		busy={cardBusyId === previewBubbleId}
-		onApprove={handlePreviewApprove}
-		onDiscard={handlePreviewDiscard}
+		card={openChange}
+		busy={actionBusy}
+		onApprove={handleCardApprove}
+		onDiscard={handleCardDiscard}
+		onUndo={handleCardUndo}
 		onClose={closePreview}
 	/>
 {/if}

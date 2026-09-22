@@ -1,73 +1,61 @@
 /**
- * "Deshacer" (Lane B7) — on an already-Aprobado change card, rolls every
- * entry it published back to exactly what was live immediately before that
+ * "Deshacer" (Lane B7, redesigned in Lane B8) — rolls production back to
+ * exactly what was live immediately before the conversation's most recent
  * approval, using the `approvedSnapshot` each entry was given at approval
- * time (see `routes/api/chat/approve`). A plain bearer-token-authenticated
- * POST the browser calls directly, never the chat model — same reasoning as
- * `approve`/`discard`. Requires "publish" scope: like `approve`, this moves
- * production.
+ * time (see `routes/api/chat/approve`), AND returns that work to the site's
+ * one open change set so the owner can adjust and approve it again. A plain
+ * bearer-token-authenticated POST the browser calls directly, never the
+ * chat model — same reasoning as `approve`/`discard`. Requires "publish"
+ * scope: like `approve`, this moves production.
  *
- * Takes `{ messageId }` (the specific card's `chat_messages.id`, which the
- * browser already has — it's rendering that exact bubble) rather than
- * always acting on "whatever the conversation's current card is": once a
- * card is published, the pending set is cleared (see `approve`), so there
- * is no longer a conversation-level pointer to it — the message id IS the
- * only remaining identity for "which approval to undo." This also means a
- * card from several turns ago can still be undone even after newer,
- * unrelated pending changes have started accumulating.
+ * ── Lane B8: undo must not throw the edit away ───────────────────────────
+ * The B7 version of this endpoint, after rolling production back, ALSO
+ * reset the entry's DRAFT (`data`) to the pre-approval snapshot — meaning
+ * the edit itself was gone, not just unpublished. The brief for this lane
+ * is explicit that this is wrong: "Deshacer... must roll production back
+ * AND return that work to the open change set... so the owner can adjust
+ * and approve again — not merely revert and lose it." This version leaves
+ * `data` exactly as it was (the approved edit) — only `published_data` /
+ * `published_position` / `status` move back to the snapshot — and re-adds
+ * the entry to the pending set (`addPendingEntries`), so the persistent
+ * pinned bar comes back showing that same work, ready for Aprobar again.
+ *
+ * Takes no body: `last_published` is a single slot on the conversation (see
+ * `pending-changes.ts`'s header — "exactly one open change set" extends to
+ * "exactly one undoable publish"), so there is nothing to disambiguate.
  */
 
-import { eq } from 'drizzle-orm';
 import { db } from '$lib/server/cms/db/client';
-import { entries } from '$lib/server/cms/db/schema';
 import { requireAuth } from '$lib/server/cms/auth/require-auth';
-import { getConversationForClient, getMessageById, setChangeCard } from '$lib/server/cms/chat/store';
+import { getConversationForClient } from '$lib/server/cms/chat/store';
+import { getLastPublished, setLastPublished, addPendingEntries } from '$lib/server/cms/chat/pending-changes';
 import { restorePublishedSnapshot } from '$lib/server/cms/mcp/tools/publish';
-import { getCollection } from '$lib/server/cms/mcp/collections';
-import { resolveEntry } from '$lib/server/cms/mcp/entry-store';
-import type { ChangeCard } from '$lib/server/cms/chat/change-card';
+import { getOpenChangeSet } from '$lib/server/cms/chat/open-change-set';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request }) => {
 	const auth = await requireAuth(request, 'publish');
 	if (auth instanceof Response) return auth;
 
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		return Response.json(
-			{ error: 'invalid_request', error_description: 'No se pudo leer el pedido. Probá de nuevo.' },
-			{ status: 400 }
-		);
-	}
-	const messageId = typeof (body as Record<string, unknown>)?.messageId === 'string' ? (body as Record<string, unknown>).messageId as string : null;
-	if (!messageId) {
-		return Response.json(
-			{ error: 'invalid_request', error_description: 'Falta indicar qué cambio deshacer.' },
-			{ status: 400 }
-		);
-	}
-
+	const origin = new URL(request.url).origin;
 	const conversation = await getConversationForClient(auth.clientId);
-	const message = conversation ? await getMessageById(messageId) : null;
-	if (!message || message.conversationId !== conversation?.id) {
+	if (!conversation) {
 		return Response.json(
-			{ error: 'not_found', error_description: 'No encontré ese cambio en esta conversación.' },
+			{ error: 'not_found', error_description: 'No encontré ninguna conversación para deshacer.' },
 			{ status: 404 }
 		);
 	}
 
-	const card = message.changeCard as ChangeCard | null;
-	if (!card || card.status !== 'published') {
+	const lastPublished = await getLastPublished(conversation.id);
+	if (!lastPublished || lastPublished.entries.length === 0) {
 		return Response.json(
-			{ error: 'invalid_state', error_description: 'Ese cambio no está publicado — no hay nada que deshacer.' },
+			{ error: 'invalid_state', error_description: 'No hay nada publicado para deshacer.' },
 			{ status: 409 }
 		);
 	}
 
 	const errors: string[] = [];
-	for (const entryCard of card.entries) {
+	for (const entryCard of lastPublished.entries) {
 		if (!entryCard.approvedSnapshot) continue;
 		const outcome = await restorePublishedSnapshot({
 			collectionKey: entryCard.collection,
@@ -76,37 +64,10 @@ export const POST: RequestHandler = async ({ request }) => {
 		});
 		if (!outcome.ok) {
 			errors.push(outcome.message);
-			continue;
 		}
-		// Also reset the DRAFT back to what's live again — without this, the
-		// approved edit stays sitting in `data` even though it's no longer
-		// live, invisible (not part of any pending set, no card pointing at
-		// it), and would silently resurface — e.g. through a preview link
-		// for an unrelated change on the same page, or the next time this
-		// exact entry happens to be touched again. "Deshacer" should mean
-		// "as if this was never approved," not just "hide it from
-		// production." Mirrors `routes/api/chat/discard`'s own "draft back
-		// to live" logic; skipped for an entry that had never been
-		// published before THIS approval (`publishedData` was null in the
-		// snapshot) — there is no live state to revert the draft to, and
-		// deleting someone's freshly-written content on an Undo would be a
-		// much more aggressive, surprising action than restoring text.
-		if (entryCard.approvedSnapshot.publishedData !== null) {
-			const collection = getCollection(entryCard.collection);
-			if (collection) {
-				const row = await resolveEntry(collection, { slug: entryCard.slug ?? undefined });
-				if (row) {
-					await db
-						.update(entries)
-						.set({
-							data: entryCard.approvedSnapshot.publishedData,
-							pendingDelete: false,
-							updatedAt: new Date()
-						})
-						.where(eq(entries.id, row.id));
-				}
-			}
-		}
+		// Deliberately NOT resetting `data` (the draft) here — see this
+		// file's header. The edited content stays exactly as approved; only
+		// what's LIVE moves back.
 	}
 
 	if (errors.length > 0) {
@@ -119,7 +80,12 @@ export const POST: RequestHandler = async ({ request }) => {
 		);
 	}
 
-	const undoneCard: ChangeCard = { status: 'undone', entries: card.entries };
-	const updated = await setChangeCard(messageId, undoneCard);
-	return Response.json({ ok: true, card: updated?.changeCard ?? undoneCard, messageId });
+	await setLastPublished(conversation.id, null);
+	await addPendingEntries(
+		conversation.id,
+		lastPublished.entries.map((e) => ({ collection: e.collection, slug: e.slug }))
+	);
+
+	const card = await getOpenChangeSet(conversation.id, origin);
+	return Response.json({ ok: true, card });
 };

@@ -16,15 +16,6 @@ export interface ToolActivity {
 	status: ToolStatus;
 }
 
-export interface ChangeCardField {
-	label: string;
-	before: string;
-	after: string;
-}
-export interface ChangeCardImage {
-	url: string;
-	alt: string;
-}
 export interface ChangeCardPage {
 	pattern: string;
 	label: string;
@@ -36,13 +27,18 @@ export interface ChangeCardEntry {
 	label: string;
 	isNew: boolean;
 	isDeletion: boolean;
-	fields: ChangeCardField[];
-	images: ChangeCardImage[];
+	/** One short, plain-language line naming what changed, e.g. "se agregó 1 imagen a la galería" — see `$lib/server/cms/chat/change-card.ts`'s header for why this replaced a field-by-field diff (Lane B8). */
+	summary: string;
 	pages: ChangeCardPage[];
 }
-/** Lane B7 — "approve this preview" card. See `$lib/server/cms/chat/change-card.ts` (the server-side twin of this type) for the full design rationale. */
+/**
+ * Lane B7, redesigned in Lane B8 — the site's ONE open change set. No
+ * longer attached to a message (see `$lib/server/cms/chat/pending-
+ * changes.ts`'s header) — rendered as a persistent pinned bar
+ * (`PendingChangeBar.svelte`), never inside the message thread.
+ */
 export interface ChangeCard {
-	status: 'pending' | 'published' | 'discarded' | 'undone';
+	status: 'pending' | 'published';
 	entries: ChangeCardEntry[];
 	publishedAt?: string;
 }
@@ -64,8 +60,6 @@ export interface ChatBubble {
 	pending: boolean;
 	/** True if the optimistic send failed outright (network error before any SSE frame arrived) — shows a retry action instead of just sitting there. */
 	failed: boolean;
-	/** Lane B7 — set only on the one assistant row currently showing the pending/published change card, if any. */
-	changeCard: ChangeCard | null;
 }
 
 export interface PendingAttachment {

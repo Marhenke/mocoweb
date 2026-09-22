@@ -1,43 +1,40 @@
 <script lang="ts">
 	/**
-	 * Lane B7 — "Ver preview": a full-screen, same-origin iframe overlay
-	 * showing the real page(s) with the pending draft applied (the signed
-	 * preview links already built server-side, `change-card.ts`), with a
-	 * fixed bottom bar carrying the same Aprobar/Descartar the chat card
-	 * has. If more than one page is affected (an entry's change can touch
-	 * more than one route — e.g. a project touches home, /trabajos, AND its
-	 * own detail page), a tab strip lets the owner switch between them.
+	 * Lane B7, extended in Lane B8 — "Ver preview": a full-screen, same-origin
+	 * iframe overlay showing the real page(s) with the pending draft applied
+	 * (the signed preview links already built server-side, `change-card.ts`),
+	 * with a fixed bottom bar carrying the same Aprobar/Descartar (or, once
+	 * approved, Deshacer) the persistent pinned bar has. If more than one
+	 * page is affected (an entry's change can touch more than one route —
+	 * e.g. a project touches home, /trabajos, AND its own detail page), a tab
+	 * strip lets the owner switch between them.
 	 *
 	 * Same-origin by construction (`change-card.ts` always builds these
 	 * URLs from this app's own `origin`) — the admin CSP's `default-src
 	 * 'self'` (no explicit `frame-src`, see `hooks.server.ts`) already
 	 * permits embedding it; `hooks.server.ts` also adds `frame-ancestors
 	 * 'self'` to every PUBLIC page's response so this iframe is allowed to
-	 * embed it while any OTHER origin still cannot.
+	 * embed it while any OTHER origin still cannot. `sandbox` keeps this a
+	 * contained browsing session — scripts/forms/same-origin still work (the
+	 * embedded page needs to hydrate normally, and this lane's own preview-
+	 * mode link rewriting needs scripts to keep every in-page navigation
+	 * inside preview), but it can never navigate the TOP window (this
+	 * /admin tab) or open a popup out of it.
 	 */
-	import type { ChangeCard, ChangeCardPage } from './types';
+	import { dedupePages } from './pages';
+	import type { ChangeCard } from './types';
 
 	interface Props {
 		card: ChangeCard;
 		busy: boolean;
 		onApprove: () => void;
 		onDiscard: () => void;
+		onUndo: () => void;
 		onClose: () => void;
 	}
-	let { card, busy, onApprove, onDiscard, onClose }: Props = $props();
+	let { card, busy, onApprove, onDiscard, onUndo, onClose }: Props = $props();
 
-	// Flatten every page across every entry in the card, deduped by pattern
-	// (two entries can legitimately share a page, e.g. both back the home
-	// preview grid).
-	let pages = $derived.by(() => {
-		const seen = new Map<string, ChangeCardPage>();
-		for (const entry of card.entries) {
-			for (const p of entry.pages) {
-				if (p.previewUrl) seen.set(p.pattern, p);
-			}
-		}
-		return [...seen.values()];
-	});
+	let pages = $derived(dedupePages(card));
 
 	let activeIndex = $state(0);
 	$effect(() => {
@@ -66,7 +63,11 @@
 	<div class="preview-frame-wrap">
 		{#if pages[activeIndex]?.previewUrl}
 			{#key pages[activeIndex].previewUrl}
-				<iframe class="preview-frame" src={pages[activeIndex].previewUrl} title={`Vista previa: ${pages[activeIndex].label}`}
+				<iframe
+					class="preview-frame"
+					src={pages[activeIndex].previewUrl}
+					sandbox="allow-scripts allow-same-origin allow-forms"
+					title={`Vista previa: ${pages[activeIndex].label}`}
 				></iframe>
 			{/key}
 		{:else}
@@ -79,6 +80,12 @@
 			<button type="button" class="btn discard" onclick={onDiscard} disabled={busy}>Descartar</button>
 			<button type="button" class="btn approve" onclick={onApprove} disabled={busy}>
 				{busy ? 'Publicando…' : 'Aprobar'}
+			</button>
+		</div>
+	{:else if card.status === 'published'}
+		<div class="preview-bar">
+			<button type="button" class="btn undo" onclick={onUndo} disabled={busy}>
+				{busy ? 'Deshaciendo…' : 'Deshacer'}
 			</button>
 		</div>
 	{/if}
@@ -188,5 +195,10 @@
 		background: transparent;
 		border-color: color-mix(in srgb, crimson 40%, transparent);
 		color: crimson;
+	}
+	.btn.undo {
+		background: transparent;
+		border-color: color-mix(in srgb, var(--color-ink) 25%, transparent);
+		color: var(--color-ink);
 	}
 </style>
