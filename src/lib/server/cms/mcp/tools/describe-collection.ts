@@ -45,7 +45,9 @@ export const describeCollectionTool: ToolDefinition = {
 					'for `projects`) — it is never a field inside `data`.',
 			'Any field whose description says it is a media path must point to a file already uploaded via ' +
 				'upload_media — that tool measures the real width/height/ratio from the file itself and returns them; ' +
-				'never estimate a ratio by hand or guess a path that was never uploaded.',
+				'never estimate a ratio by hand or guess a path that was never uploaded. Use the `url` value ' +
+				"upload_media (or list_media) returned VERBATIM for that field — never construct or guess the path's " +
+				'shape yourself, and never reuse a shape from memory of an older/different file.',
 			"A write is validated against exactly this schema before anything is saved. A rejected write's error " +
 				'message names the specific field path and rule that failed — fix that field and resubmit.',
 			'Every write here (create_entry, update_entry, delete_entry, reorder_entries) only ever touches the ' +
