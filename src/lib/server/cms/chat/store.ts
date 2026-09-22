@@ -43,6 +43,8 @@ export interface ChatMessageRow {
 	budgetBlocked: boolean;
 	/** Lane B6 — true for a partial assistant reply persisted because the owner hit Stop mid-stream. See `db/schema.ts`'s column comment. */
 	stopped: boolean;
+	/** Lane B7 — the approve-this-preview card, when this row is the one currently showing it. See `chat/change-card.ts`. */
+	changeCard: import('./change-card').ChangeCard | null;
 	createdAt: Date;
 }
 
@@ -97,7 +99,28 @@ export async function listMessages(conversationId: string): Promise<ChatMessageR
 		.from(chatMessages)
 		.where(eq(chatMessages.conversationId, conversationId))
 		.orderBy(chatMessages.createdAt);
-	return rows.map((r) => ({ ...r, role: r.role as ChatRole, content: r.content as ChatContentBlock[] }));
+	return rows.map((r) => ({
+		...r,
+		role: r.role as ChatRole,
+		content: r.content as ChatContentBlock[],
+		changeCard: (r.changeCard as ChatMessageRow['changeCard']) ?? null
+	}));
+}
+
+/** Reads one message row by id — used to check whether a card's target message still exists before relocating/updating it. */
+export async function getMessageById(id: string): Promise<ChatMessageRow | null> {
+	const rows = await db.select().from(chatMessages).where(eq(chatMessages.id, id)).limit(1);
+	const r = rows[0];
+	if (!r) return null;
+	return { ...r, role: r.role as ChatRole, content: r.content as ChatContentBlock[], changeCard: (r.changeCard as ChatMessageRow['changeCard']) ?? null };
+}
+
+/** Sets (or clears, with `null`) the change card shown on one message row — used by `chat/agent.ts` (attaching/relocating a card each turn) and the approve/discard/undo endpoints (freezing the card's final state). */
+export async function setChangeCard(id: string, card: ChatMessageRow['changeCard']): Promise<ChatMessageRow | null> {
+	const rows = await db.update(chatMessages).set({ changeCard: card }).where(eq(chatMessages.id, id)).returning();
+	const r = rows[0];
+	if (!r) return null;
+	return { ...r, role: r.role as ChatRole, content: r.content as ChatContentBlock[], changeCard: (r.changeCard as ChatMessageRow['changeCard']) ?? null };
 }
 
 export async function appendMessage(params: {
@@ -124,7 +147,12 @@ export async function appendMessage(params: {
 		})
 		.returning();
 	await touchConversation(params.conversationId);
-	return { ...row, role: row.role as ChatRole, content: row.content as ChatContentBlock[] };
+	return {
+		...row,
+		role: row.role as ChatRole,
+		content: row.content as ChatContentBlock[],
+		changeCard: (row.changeCard as ChatMessageRow['changeCard']) ?? null
+	};
 }
 
 /** Anthropic Messages API `{role, content}` param, straight from a stored row. */

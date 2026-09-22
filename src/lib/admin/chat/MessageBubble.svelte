@@ -11,14 +11,21 @@
 	 */
 	import { renderMarkdown } from './markdown';
 	import { formatTime } from './format';
+	import ChangeCardView from './ChangeCardView.svelte';
 	import type { ChatBubble, ToolActivity } from './types';
 
 	interface Props {
 		bubble: ChatBubble;
 		tools: Record<string, ToolActivity>;
 		onRetry?: (bubble: ChatBubble) => void;
+		cardBusy?: boolean;
+		onCardPreview?: () => void;
+		onCardApprove?: () => void;
+		onCardDiscard?: () => void;
+		onCardUndo?: () => void;
 	}
-	let { bubble, tools, onRetry }: Props = $props();
+	let { bubble, tools, onRetry, cardBusy = false, onCardPreview, onCardApprove, onCardDiscard, onCardUndo }: Props =
+		$props();
 
 	let toolList = $derived(bubble.toolIds.map((id) => tools[id]).filter((t): t is ToolActivity => !!t));
 	let html = $derived(bubble.role === 'assistant' && bubble.text ? renderMarkdown(bubble.text) : '');
@@ -73,6 +80,17 @@
 
 		{#if bubble.stopped}
 			<div class="stopped-tag">Generación detenida</div>
+		{/if}
+
+		{#if bubble.changeCard}
+			<ChangeCardView
+				card={bubble.changeCard}
+				busy={cardBusy}
+				onPreview={() => onCardPreview?.()}
+				onApprove={() => onCardApprove?.()}
+				onDiscard={() => onCardDiscard?.()}
+				onUndo={() => onCardUndo?.()}
+			/>
 		{/if}
 
 		<div class="meta-row">

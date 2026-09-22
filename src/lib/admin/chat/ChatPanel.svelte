@@ -17,7 +17,10 @@
 	import EmptyState from './EmptyState.svelte';
 	import { streamChat, isAbortError } from './sse';
 	import { toolActivityLabelFallback } from './tool-labels';
-	import type { ChatBubble, ToolActivity, PendingAttachment } from './types';
+	import PreviewOverlay from './PreviewOverlay.svelte';
+	import ConfirmDialog from './ConfirmDialog.svelte';
+	import { validateAttachmentFiles } from './attachment-validation';
+	import type { ChatBubble, ToolActivity, PendingAttachment, ChangeCard } from './types';
 
 	interface ContentBlock {
 		type: string;
@@ -35,6 +38,7 @@
 		content: ContentBlock[];
 		budgetBlocked: boolean;
 		stopped: boolean;
+		changeCard: ChangeCard | null;
 		createdAt: string;
 	}
 
@@ -58,11 +62,27 @@
 	let loadingHistory = $state(true);
 	let confirmingReset = $state(false);
 	let resettingConversation = $state(false);
+	let confirmingLogout = $state(false);
+	// Lane B7 — preview-approval state. `cardBusyId` is the bubble id whose
+	// Aprobar/Descartar/Deshacer is currently in flight (disables that
+	// card's buttons only, not the whole chat). `previewBubbleId`/
+	// `previewCard` drive the full-screen overlay.
+	let cardBusyId = $state<string | null>(null);
+	let previewBubbleId = $state<string | null>(null);
+	let previewCard = $state<ChangeCard | null>(null);
+	// Lane B7 — page-wide drag-and-drop (moved here from `Composer.svelte`;
+	// see that component's header). `pageDragDepth` is a plain counter, not
+	// `$state`, because `dragenter`/`dragleave` fire once per DOM boundary
+	// the pointer crosses (they bubble like ordinary events, unlike
+	// mouseenter/mouseleave) — only `pageDragActive` (derived from the
+	// counter reaching/leaving zero) needs to be reactive.
+	let pageDragActive = $state(false);
+	let pageDragDepth = 0;
 
 	let conversationId: string | null = null;
 	let currentAbort: AbortController | null = null;
 	let liveBubbleId: string | null = null;
-	let retryPayloads: Record<string, { text: string; files: File[] }> = {};
+	let retryPayloads: Record<string, { text: string; attachments: PendingAttachment[] }> = {};
 	let liveAnnounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function tempId(): string {
@@ -112,7 +132,7 @@
 			for (const t of toolUses) {
 				nextTools[t.id] = { id: t.id, name: t.name, label: toolActivityLabelFallback(t.name), status: 'running' };
 			}
-			if (!text && images.length === 0 && toolUses.length === 0) continue;
+			if (!text && images.length === 0 && toolUses.length === 0 && !row.changeCard) continue;
 			out.push({
 				id: row.id,
 				role: row.role,
@@ -124,7 +144,8 @@
 				createdAt: row.createdAt,
 				streaming: false,
 				pending: false,
-				failed: false
+				failed: false,
+				changeCard: row.changeCard ?? null
 			});
 		}
 		tools = { ...tools, ...nextTools };
@@ -177,7 +198,8 @@
 			createdAt: new Date().toISOString(),
 			streaming: true,
 			pending: false,
-			failed: false
+			failed: false,
+			changeCard: null
 		};
 		liveBubbleId = b.id;
 		bubbles = [...bubbles, b];
@@ -204,7 +226,14 @@
 		}, 900);
 	}
 
-	function finalizeLiveBubble(row: { id: string; content: ContentBlock[]; budgetBlocked: boolean; stopped: boolean; createdAt: string }): void {
+	function finalizeLiveBubble(row: {
+		id: string;
+		content: ContentBlock[];
+		budgetBlocked: boolean;
+		stopped: boolean;
+		changeCard?: ChangeCard | null;
+		createdAt: string;
+	}): void {
 		const { text, images, toolUses } = blockFields(row.content);
 		for (const t of toolUses) {
 			if (!tools[t.id]) tools = { ...tools, [t.id]: { id: t.id, name: t.name, label: toolActivityLabelFallback(t.name), status: 'running' } };
@@ -219,10 +248,49 @@
 			budgetBlocked: row.budgetBlocked,
 			stopped: row.stopped,
 			createdAt: row.createdAt,
-			streaming: false
+			streaming: false,
+			changeCard: row.changeCard ?? b.changeCard
 		};
 		bubbles = bubbles.map((x) => (x.id === b.id ? merged : x));
 		liveBubbleId = null;
+	}
+
+	/** Lane B7 — the `change_card` SSE event: relocates the card to `row`'s bubble (creating it if the turn produced no text, which shouldn't normally happen but is handled defensively) and clears it off whatever bubble previously showed it, if that bubble is currently in view. */
+	function applyChangeCardEvent(row: StoredRow, previousCardMessageId: string | null): void {
+		let found = false;
+		bubbles = bubbles.map((b) => {
+			if (previousCardMessageId && b.id === previousCardMessageId) return { ...b, changeCard: null };
+			if (b.id === row.id) {
+				found = true;
+				return { ...b, changeCard: row.changeCard };
+			}
+			return b;
+		});
+		if (!found) {
+			// The row's own bubble doesn't exist yet in this session's list
+			// (shouldn't happen — `assistant_message`/`stopped` always fires
+			// first — but never silently drop the card over ordering).
+			const { text, images } = blockFields(row.content);
+			bubbles = [
+				...bubbles,
+				{
+					id: row.id,
+					role: 'assistant',
+					text,
+					toolIds: [],
+					images,
+					budgetBlocked: row.budgetBlocked,
+					stopped: row.stopped,
+					createdAt: row.createdAt,
+					streaming: false,
+					pending: false,
+					failed: false,
+					changeCard: row.changeCard
+				}
+			];
+		}
+		// Keep the preview overlay (if open) showing the freshest card data.
+		if (previewBubbleId === row.id) previewCard = row.changeCard;
 	}
 
 	function resetLiveAnnounceTimer(): void {
@@ -232,11 +300,26 @@
 		}
 	}
 
-	async function runTurn(text: string, attachmentFiles: File[]): Promise<void> {
+	// Lane B7 fix: this used to read `pendingAttachments` (component-level
+	// state) directly for the optimistic preview thumbnail and the
+	// per-file "uploading" status — but every caller already clears
+	// `pendingAttachments = []` BEFORE calling this function (so the
+	// composer visually empties immediately on send), so both reads always
+	// saw an empty array. The sent message showed no thumbnail at all in
+	// the optimistic bubble, and — because the same broken read also fed
+	// what got persisted to `retryPayloads`/shown after the `user_message`
+	// SSE event in the *usual* case still worked (that path re-derives
+	// images from the server's own row), the bug was easy to miss outside
+	// of the split-second before the server confirms — but a slow
+	// connection, or reading the code, made it obvious. Fix: the caller
+	// hands over its own snapshot of the attachments (taken before
+	// clearing `pendingAttachments`) instead of this function reading
+	// shared state that's already moved on.
+	async function runTurn(text: string, attachments: PendingAttachment[]): Promise<void> {
 		const userTempId = tempId();
-		retryPayloads[userTempId] = { text, files: attachmentFiles };
+		retryPayloads[userTempId] = { text, attachments };
 
-		const previewImages = pendingAttachments
+		const previewImages = attachments
 			.filter((a) => a.previewUrl)
 			.map((a) => ({ url: a.previewUrl as string, alt: a.file.name }));
 
@@ -253,7 +336,8 @@
 				createdAt: new Date().toISOString(),
 				streaming: false,
 				pending: true,
-				failed: false
+				failed: false,
+				changeCard: null
 			}
 		];
 
@@ -273,14 +357,16 @@
 			}
 
 			const attachmentsPayload = await Promise.all(
-				attachmentFiles.map(async (file, i) => {
-					const match = pendingAttachments[i];
-					if (match) match.status = 'uploading';
-					pendingAttachments = [...pendingAttachments];
+				attachments.map(async (a) => {
+					// Mutating the snapshot object directly (not the — already
+					// cleared — `pendingAttachments` state) is enough: nothing else
+					// reads this attachment's `status` after send, this is purely
+					// informational for anyone inspecting the snapshot mid-flight.
+					a.status = 'uploading';
 					return {
-						filename: file.name,
-						mime: file.type || 'application/octet-stream',
-						dataBase64: await fileToBase64(file)
+						filename: a.file.name,
+						mime: a.file.type || 'application/octet-stream',
+						dataBase64: await fileToBase64(a.file)
 					};
 				})
 			);
@@ -345,6 +431,12 @@
 						finalizeLiveBubble(row);
 						break;
 					}
+					case 'change_card': {
+						const row = d.row as StoredRow;
+						const previousCardMessageId = (d.previousCardMessageId as string | null) ?? null;
+						applyChangeCardEvent(row, previousCardMessageId);
+						break;
+					}
 					case 'done': {
 						resetLiveAnnounceTimer();
 						liveAnnouncement = (d.assistantText as string) || liveAnnouncement;
@@ -406,12 +498,11 @@
 	async function handleSend(): Promise<void> {
 		if (sending) return;
 		const text = chatInput.trim();
-		const files = pendingAttachments.map((a) => a.file);
-		if (!text && files.length === 0) return;
+		if (!text && pendingAttachments.length === 0) return;
 		chatInput = '';
 		const attachmentsSnapshot = pendingAttachments;
 		pendingAttachments = [];
-		await runTurn(text, files);
+		await runTurn(text, attachmentsSnapshot);
 		for (const a of attachmentsSnapshot) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
 	}
 
@@ -420,11 +511,23 @@
 		if (!payload) return;
 		bubbles = bubbles.filter((b) => b.id !== bubble.id);
 		delete retryPayloads[bubble.id];
-		void runTurn(payload.text, payload.files);
+		// The snapshot's preview URLs were already revoked after the failed
+		// send (see `handleSend`) — regenerate fresh ones from the still-valid
+		// `File` objects so the retried optimistic bubble shows a thumbnail too.
+		const attachments = payload.attachments.map((a) => ({
+			...a,
+			previewUrl: a.file.type.startsWith('image/') ? URL.createObjectURL(a.file) : null,
+			status: 'ready' as const
+		}));
+		void runTurn(payload.text, attachments);
 	}
 
+	// Lane B7: a suggestion chip sends immediately (per the brief) rather than
+	// just filling the composer for the owner to press send themselves —
+	// tapping a suggestion IS the action, not a shortcut to typing it.
 	function handlePickSuggestion(text: string): void {
-		chatInput = text;
+		if (sending) return;
+		void runTurn(text, []);
 	}
 
 	function onFilesAdded(files: File[]): void {
@@ -442,6 +545,129 @@
 		const target = pendingAttachments.find((a) => a.id === id);
 		if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
 		pendingAttachments = pendingAttachments.filter((a) => a.id !== id);
+	}
+
+	// ── Lane B7: page-wide drop ───────────────────────────────────────────
+	// `dragover` is ALWAYS prevented, regardless of what's being dragged —
+	// that's the one call that stops the browser from navigating to a
+	// dropped file (per the brief: "dropping outside the composer must
+	// never make the browser navigate to the file"). The overlay/attach
+	// behavior below it is additionally gated on the drag actually carrying
+	// files, so dragging plain text around the page is unaffected.
+	function isFileDrag(event: DragEvent): boolean {
+		return !!event.dataTransfer?.types.includes('Files');
+	}
+	function onWindowDragEnter(event: DragEvent): void {
+		event.preventDefault();
+		if (!isFileDrag(event)) return;
+		pageDragDepth++;
+		pageDragActive = true;
+	}
+	function onWindowDragOver(event: DragEvent): void {
+		event.preventDefault();
+	}
+	function onWindowDragLeave(event: DragEvent): void {
+		event.preventDefault();
+		pageDragDepth = Math.max(0, pageDragDepth - 1);
+		if (pageDragDepth === 0) pageDragActive = false;
+	}
+	function onWindowDrop(event: DragEvent): void {
+		event.preventDefault();
+		pageDragDepth = 0;
+		pageDragActive = false;
+		const files = Array.from(event.dataTransfer?.files ?? []);
+		if (files.length === 0) return;
+		const { ok, message } = validateAttachmentFiles(files);
+		if (message) chatError = message;
+		if (ok.length > 0) onFilesAdded(ok);
+	}
+
+	// ── Lane B7: preview-approval actions ────────────────────────────────────
+	// Each endpoint acts on the conversation's CURRENT pending set (approve/
+	// discard) or a specific card by message id (undo — see
+	// `routes/api/chat/undo`'s header for why undo needs the id explicitly).
+	// All three return `{ ok, card, messageId, error_description? }`; the
+	// returned card always replaces whatever that bubble was showing, so the
+	// UI never has to guess the new state itself.
+	function applyCardResult(fallbackBubbleId: string, data: Record<string, unknown>): void {
+		const messageId = (data.messageId as string | undefined) ?? fallbackBubbleId;
+		const card = (data.card as ChangeCard | null | undefined) ?? null;
+		bubbles = bubbles.map((b) => (b.id === messageId ? { ...b, changeCard: card } : b));
+		if (previewBubbleId === messageId) {
+			if (card && (card.status === 'pending' || card.status === 'published')) {
+				// Keep the overlay open: on Aprobar it now shows the page that's
+				// actually live (worth confirming at a glance), just without the
+				// action bar (see `PreviewOverlay.svelte` — only 'pending' gets one).
+				previewCard = card;
+			} else {
+				// Descartar/Deshacer: nothing left to review, close it.
+				previewBubbleId = null;
+				previewCard = null;
+			}
+		}
+		const errors = data.errors as string[] | undefined;
+		if (data.ok === false) {
+			chatError =
+				(data.error_description as string | undefined) ??
+				(errors && errors.length > 0
+					? `No se pudo completar del todo: ${errors[0]}`
+					: 'No se pudo completar la acción. Probá de nuevo.');
+		} else {
+			chatError = '';
+		}
+	}
+
+	async function postCardAction(path: string, bubbleId: string, body?: unknown): Promise<void> {
+		if (cardBusyId) return;
+		cardBusyId = bubbleId;
+		try {
+			const res = await authedFetch(path, {
+				method: 'POST',
+				headers: body ? { 'content-type': 'application/json' } : undefined,
+				body: body ? JSON.stringify(body) : undefined
+			});
+			let data: Record<string, unknown>;
+			try {
+				data = (await res.json()) as Record<string, unknown>;
+			} catch {
+				data = { ok: false, error_description: 'No se pudo leer la respuesta del servidor. Probá de nuevo.' };
+			}
+			if (!res.ok && !('card' in data)) {
+				chatError =
+					(data.error_description as string | undefined) ?? 'No se pudo completar la acción. Probá de nuevo.';
+				return;
+			}
+			applyCardResult(bubbleId, data);
+		} catch {
+			chatError = 'No se pudo conectar con el servidor. Revisá tu conexión y probá de nuevo.';
+		} finally {
+			cardBusyId = null;
+		}
+	}
+
+	function handleCardApprove(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/approve', bubble.id);
+	}
+	function handleCardDiscard(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/discard', bubble.id);
+	}
+	function handleCardUndo(bubble: ChatBubble): void {
+		void postCardAction('/api/chat/undo', bubble.id, { messageId: bubble.id });
+	}
+	function handleCardPreview(bubble: ChatBubble): void {
+		if (!bubble.changeCard) return;
+		previewBubbleId = bubble.id;
+		previewCard = bubble.changeCard;
+	}
+	function closePreview(): void {
+		previewBubbleId = null;
+		previewCard = null;
+	}
+	function handlePreviewApprove(): void {
+		if (previewBubbleId) handleCardApprove({ id: previewBubbleId } as ChatBubble);
+	}
+	function handlePreviewDiscard(): void {
+		if (previewBubbleId) handleCardDiscard({ id: previewBubbleId } as ChatBubble);
 	}
 
 	function askResetConversation(): void {
@@ -467,9 +693,33 @@
 			confirmingReset = false;
 		}
 	}
+
+	function askLogout(): void {
+		confirmingLogout = true;
+	}
+	function cancelLogout(): void {
+		confirmingLogout = false;
+	}
+	function confirmLogout(): void {
+		confirmingLogout = false;
+		onLogout();
+	}
 </script>
 
+<svelte:window
+	ondragenter={onWindowDragEnter}
+	ondragover={onWindowDragOver}
+	ondragleave={onWindowDragLeave}
+	ondrop={onWindowDrop}
+/>
+
 <div class="chat-shell">
+	{#if pageDragActive}
+		<div class="page-drop-overlay" role="presentation">
+			<div class="page-drop-message">Soltá la imagen o el video para adjuntarlo</div>
+		</div>
+	{/if}
+
 	<div class="chat-topbar">
 		<div class="chat-topbar-title">
 			<span class="brand">Moco</span>
@@ -477,16 +727,8 @@
 			<span>Panel</span>
 		</div>
 		<div class="chat-topbar-actions">
-			{#if confirmingReset}
-				<span class="confirm-text">¿Borrar toda la conversación?</span>
-				<button type="button" class="ghost" onclick={cancelResetConversation} disabled={resettingConversation}>Cancelar</button>
-				<button type="button" class="danger" onclick={confirmResetConversation} disabled={resettingConversation}>
-					{resettingConversation ? 'Borrando…' : 'Sí, borrar'}
-				</button>
-			{:else}
-				<button type="button" class="ghost" onclick={askResetConversation} disabled={bubbles.length === 0}>Borrar conversación</button>
-			{/if}
-			<button type="button" class="ghost" onclick={onLogout}>Cerrar sesión</button>
+			<button type="button" class="ghost" onclick={askResetConversation} disabled={bubbles.length === 0}>Borrar conversación</button>
+			<button type="button" class="ghost" onclick={askLogout}>Cerrar sesión</button>
 		</div>
 	</div>
 
@@ -496,7 +738,19 @@
 		{:else if bubbles.length === 0}
 			<EmptyState onPick={handlePickSuggestion} />
 		{:else}
-			<MessageList {bubbles} {tools} showTyping={awaitingFirstToken} {liveAnnouncement} {updateTick} onRetry={handleRetry} />
+			<MessageList
+				{bubbles}
+				{tools}
+				showTyping={awaitingFirstToken}
+				{liveAnnouncement}
+				{updateTick}
+				onRetry={handleRetry}
+				{cardBusyId}
+				onCardPreview={handleCardPreview}
+				onCardApprove={handleCardApprove}
+				onCardDiscard={handleCardDiscard}
+				onCardUndo={handleCardUndo}
+			/>
 		{/if}
 	</div>
 
@@ -515,12 +769,65 @@
 	/>
 </div>
 
+{#if previewCard}
+	<PreviewOverlay
+		card={previewCard}
+		busy={cardBusyId === previewBubbleId}
+		onApprove={handlePreviewApprove}
+		onDiscard={handlePreviewDiscard}
+		onClose={closePreview}
+	/>
+{/if}
+
+{#if confirmingReset}
+	<ConfirmDialog
+		title="Borrar conversación"
+		message="Se va a borrar toda la conversación con este chat. Esta acción no se puede deshacer."
+		confirmLabel={resettingConversation ? 'Borrando…' : 'Sí, borrar'}
+		danger
+		busy={resettingConversation}
+		onConfirm={confirmResetConversation}
+		onCancel={cancelResetConversation}
+	/>
+{/if}
+
+{#if confirmingLogout}
+	<ConfirmDialog
+		title="Cerrar sesión"
+		message="Vas a tener que volver a ingresar tu clave para entrar de nuevo al panel."
+		confirmLabel="Cerrar sesión"
+		onConfirm={confirmLogout}
+		onCancel={cancelLogout}
+	/>
+{/if}
+
 <style>
 	.chat-shell {
 		flex: 1;
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
+		position: relative;
+	}
+
+	.page-drop-overlay {
+		position: absolute;
+		inset: 0;
+		z-index: 50;
+		background: color-mix(in srgb, var(--color-lime) 22%, white 60%);
+		border: 3px dashed var(--color-ink);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		pointer-events: none;
+	}
+	.page-drop-message {
+		font-weight: 700;
+		font-size: 1.1rem;
+		color: var(--color-ink);
+		background: white;
+		padding: 0.7rem 1.2rem;
+		border-radius: 0.8rem;
 	}
 
 	.chat-topbar {
@@ -560,19 +867,6 @@
 	}
 	.ghost:disabled {
 		opacity: 0.45;
-	}
-	.danger {
-		background: crimson;
-		color: white;
-		border: 1px solid crimson;
-		border-radius: 0.5rem;
-		padding: 0.4rem 0.7rem;
-		font-size: 0.8rem;
-		min-height: 44px;
-	}
-	.confirm-text {
-		font-size: 0.78rem;
-		color: var(--color-muted, #666);
 	}
 
 	.chat-body {

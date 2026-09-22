@@ -1,12 +1,24 @@
 <script lang="ts">
 	/**
-	 * The message composer (Lane B6): auto-growing textarea (max height, then
-	 * scroll), Enter-to-send / Shift+Enter-newline on desktop (Enter inserts a
-	 * newline on touch devices — the button sends there instead, since a
-	 * virtual keyboard's Enter/Return key is what people expect to make a new
-	 * line), drag-and-drop with a visible drop-zone overlay, paste-to-attach,
-	 * a file-picker button, thumbnails with per-file removal and upload
-	 * progress, and a mobile keyboard-safe layout via `visualViewport`.
+	 * The message composer (Lane B6, reworked in B7): ONE contained rounded
+	 * "well" — the attach button, the textarea, and the send/stop button all
+	 * live inside a single rounded container (per the B7 brief; previously
+	 * the textarea was its own separate pill next to two free-floating round
+	 * buttons, which read as three components, not one). Collapsed to a
+	 * single line by default; focusing it (even before typing) opens it to
+	 * ~2 lines; typing grows it further up to 4 lines, then it scrolls
+	 * internally with no native scrollbar visible until it actually
+	 * overflows that 4th line (see `autoGrow` below — `resize: none` plus an
+	 * explicit height cap is what fixes Safari's scrollbar/resize-handle
+	 * artifact breaking the well's rounded corner, which is what "Safari
+	 * scrollbar breaking its geometry" in the brief refers to).
+	 *
+	 * Drag-and-drop moved OUT of this component in B7 — the brief wants a
+	 * file dropped ANYWHERE on the page to attach, not just on the composer,
+	 * so that's now handled once, page-wide, by `ChatPanel.svelte`
+	 * (`onWindowDrop` et al.) using the same `attachment-validation.ts` this
+	 * file also uses for the file picker and paste-to-attach, so all three
+	 * entry points enforce identical rules.
 	 *
 	 * Never a blocking button (per the brief): the send/stop control is
 	 * ALWAYS clickable — while a turn is in flight it becomes Stop instead of
@@ -14,6 +26,7 @@
 	 * at a frozen, unresponsive control.
 	 */
 	import type { PendingAttachment } from './types';
+	import { validateAttachmentFiles } from './attachment-validation';
 
 	interface Props {
 		value: string;
@@ -43,21 +56,31 @@
 
 	let textareaEl: HTMLTextAreaElement | undefined = $state();
 	let fileInputEl: HTMLInputElement | undefined = $state();
-	let dragActive = $state(false);
-	let dragDepth = 0;
 	let composerEl: HTMLDivElement | undefined = $state();
+	let focused = $state(false);
 
-	const MAX_FILE_BYTES = 8 * 1024 * 1024; // 8MB — a client-side safety margin (see this file's callers for why an exact server limit isn't chased here).
-	const ACCEPTED_TYPES = /^image\/|^video\/(mp4|webm|quicktime)/;
 	let validationMessage = $state('');
+
+	// One line ≈ 44px (matches the 44px touch-target minimum already used
+	// throughout this app). ~2 lines while focused-but-not-grown, capped at
+	// ~4 lines — past that, the textarea's own native `overflow-y: auto`
+	// takes over (no scrollbar rendered at all until `scrollHeight` actually
+	// exceeds this cap, which is the "no stray scrollbar" requirement).
+	const LINE_PX = 22;
+	const COLLAPSED_PX = 44;
+	const FOCUSED_MIN_PX = 44 + LINE_PX; // ~2 lines
+	const MAX_PX = 44 + LINE_PX * 3; // ~4 lines
 
 	function autoGrow(): void {
 		if (!textareaEl) return;
 		textareaEl.style.height = 'auto';
-		textareaEl.style.height = `${Math.min(textareaEl.scrollHeight, 200)}px`;
+		const floor = focused ? FOCUSED_MIN_PX : COLLAPSED_PX;
+		const next = Math.min(Math.max(textareaEl.scrollHeight, floor), MAX_PX);
+		textareaEl.style.height = `${next}px`;
 	}
 	$effect(() => {
 		void value;
+		void focused;
 		autoGrow();
 	});
 
@@ -73,54 +96,12 @@
 		if (canSend()) onSend();
 	}
 
-	function validateFiles(files: File[]): File[] {
-		const ok: File[] = [];
-		const problems: string[] = [];
-		for (const file of files) {
-			if (!ACCEPTED_TYPES.test(file.type)) {
-				problems.push(`"${file.name}": tipo de archivo no admitido (solo imágenes o video).`);
-				continue;
-			}
-			if (file.size > MAX_FILE_BYTES) {
-				problems.push(`"${file.name}": pesa demasiado (máximo ${MAX_FILE_BYTES / 1024 / 1024}MB).`);
-				continue;
-			}
-			ok.push(file);
-		}
-		validationMessage = problems.join(' ');
-		if (ok.length > 0 && problems.length === 0) validationMessage = '';
-		return ok;
-	}
-
 	function onFileInputChange(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		const files = validateFiles(Array.from(input.files ?? []));
-		if (files.length > 0) onFilesAdded(files);
-		input.value = '';
-	}
-
-	function onDragEnter(event: DragEvent): void {
-		if (!event.dataTransfer?.types.includes('Files')) return;
-		event.preventDefault();
-		dragDepth++;
-		dragActive = true;
-	}
-	function onDragOver(event: DragEvent): void {
-		if (!event.dataTransfer?.types.includes('Files')) return;
-		event.preventDefault();
-	}
-	function onDragLeave(event: DragEvent): void {
-		event.preventDefault();
-		dragDepth = Math.max(0, dragDepth - 1);
-		if (dragDepth === 0) dragActive = false;
-	}
-	function onDrop(event: DragEvent): void {
-		event.preventDefault();
-		dragDepth = 0;
-		dragActive = false;
-		const files = Array.from(event.dataTransfer?.files ?? []);
-		const ok = validateFiles(files);
+		const { ok, message } = validateAttachmentFiles(Array.from(input.files ?? []));
+		validationMessage = message;
 		if (ok.length > 0) onFilesAdded(ok);
+		input.value = '';
 	}
 
 	function onPaste(event: ClipboardEvent): void {
@@ -131,7 +112,8 @@
 			.filter((f): f is File => f !== null);
 		if (files.length === 0) return; // let normal text paste through
 		event.preventDefault();
-		const ok = validateFiles(files);
+		const { ok, message } = validateAttachmentFiles(files);
+		validationMessage = message;
 		if (ok.length > 0) onFilesAdded(ok);
 	}
 
@@ -170,20 +152,8 @@
 <div
 	bind:this={composerEl}
 	class="composer-wrap"
-	role="group"
-	aria-label="Compositor de mensajes"
 	style={keyboardInset > 0 ? `padding-bottom: ${keyboardInset}px` : undefined}
-	ondragenter={onDragEnter}
-	ondragover={onDragOver}
-	ondragleave={onDragLeave}
-	ondrop={onDrop}
 >
-	{#if dragActive}
-		<div class="drop-overlay" role="presentation">
-			<div class="drop-message">Soltá para adjuntar</div>
-		</div>
-	{/if}
-
 	{#if validationMessage}
 		<div class="validation-msg" role="alert">{validationMessage}</div>
 	{/if}
@@ -216,7 +186,7 @@
 		</div>
 	{/if}
 
-	<div class="composer">
+	<div class="well" role="group" aria-label="Compositor de mensajes">
 		<button
 			type="button"
 			class="icon-btn attach-btn"
@@ -245,6 +215,8 @@
 			onkeydown={handleKeydown}
 			oninput={autoGrow}
 			onpaste={onPaste}
+			onfocus={() => (focused = true)}
+			onblur={() => (focused = false)}
 			placeholder="Escribí tu mensaje…"
 			rows="1"
 			aria-label="Mensaje"
@@ -277,29 +249,14 @@
 		position: relative;
 		border-top: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
 		background: var(--color-cream-dark, #f4f0e6);
-		padding-bottom: env(safe-area-inset-bottom);
-	}
-
-	.drop-overlay {
-		position: absolute;
-		inset: 0;
-		background: color-mix(in srgb, var(--color-lime) 22%, white 60%);
-		border: 2px dashed var(--color-ink);
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		z-index: 5;
-		pointer-events: none;
-	}
-	.drop-message {
-		font-weight: 700;
-		color: var(--color-ink);
+		padding: 0.7rem 1rem;
+		padding-bottom: calc(0.7rem + env(safe-area-inset-bottom));
 	}
 
 	.validation-msg {
 		max-width: 46rem;
 		margin: 0 auto;
-		padding: 0.4rem 1rem 0;
+		padding: 0 0 0.4rem;
 		font-size: 0.78rem;
 		color: crimson;
 	}
@@ -310,7 +267,7 @@
 		flex-wrap: wrap;
 		max-width: 46rem;
 		margin: 0 auto;
-		padding: 0.6rem 1rem 0;
+		padding: 0 0 0.6rem;
 	}
 	.attachment {
 		position: relative;
@@ -388,29 +345,40 @@
 		font-size: 0.9rem;
 	}
 
-	.composer {
+	/* ── The single rounded well ─────────────────────────────────────────── */
+	.well {
 		display: flex;
 		align-items: flex-end;
-		gap: 0.5rem;
+		gap: 0.35rem;
 		max-width: 46rem;
 		margin: 0 auto;
-		padding: 0.7rem 1rem;
+		background: white;
+		border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+		border-radius: 1.4rem;
+		padding: 0.3rem 0.35rem;
+		box-sizing: border-box;
+	}
+	.well:focus-within {
+		border-color: color-mix(in srgb, var(--color-ink) 40%, transparent);
 	}
 
 	.icon-btn {
 		flex-shrink: 0;
-		width: 2.75rem;
-		height: 2.75rem;
+		width: 2.5rem;
+		height: 2.5rem;
 		min-width: 44px;
 		min-height: 44px;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		border-radius: 50%;
-		background: white;
+		background: transparent;
 		border: none;
 		cursor: pointer;
 		color: var(--color-ink);
+	}
+	.icon-btn:hover {
+		background: color-mix(in srgb, var(--color-ink) 6%, transparent);
 	}
 	.icon-btn:focus-visible {
 		outline: 2px solid var(--color-ink);
@@ -425,31 +393,34 @@
 		clip: rect(0, 0, 0, 0);
 	}
 
-	.composer textarea {
+	.well textarea {
 		flex: 1;
 		resize: none;
-		max-height: 200px;
 		min-height: 44px;
-		padding: 0.65rem 0.85rem;
-		border-radius: 1.3rem;
-		border: 1px solid color-mix(in srgb, var(--color-ink) 20%, transparent);
+		max-height: 110px; /* ~4 lines — kept in sync with MAX_PX in the script */
+		padding: 0.65rem 0.4rem;
+		border: none;
+		outline: none;
+		background: transparent;
 		font-family: inherit;
 		/* 16px minimum: iOS Safari zooms the page on focus for any input
 		   font-size below this. */
 		font-size: 16px;
 		line-height: 1.4;
-		background: white;
 		color: var(--color-ink);
-	}
-	.composer textarea:focus-visible {
-		outline: 2px solid var(--color-ink);
-		outline-offset: 1px;
+		/* `overflow-y: auto` (the browser default) already means no scrollbar
+		   renders until `scrollHeight` exceeds the element's own height — the
+		   cap above is what makes that point "4 lines," not sooner. `resize:
+		   none` is what stops Safari/Chrome from drawing a resize handle in
+		   the corner, which is what broke the well's rounded geometry before
+		   this lane (a square-cornered grab handle sitting on top of a
+		   rounded pill). */
 	}
 
 	.send-btn {
 		flex-shrink: 0;
-		width: 2.75rem;
-		height: 2.75rem;
+		width: 2.5rem;
+		height: 2.5rem;
 		min-width: 44px;
 		min-height: 44px;
 		border-radius: 50%;
@@ -473,8 +444,9 @@
 	}
 
 	@media (max-width: 30rem) {
-		.composer {
+		.composer-wrap {
 			padding: 0.6rem 0.75rem;
+			padding-bottom: calc(0.6rem + env(safe-area-inset-bottom));
 		}
 	}
 </style>

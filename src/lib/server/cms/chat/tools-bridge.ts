@@ -33,12 +33,37 @@ import type { ToolContext, ToolResult } from '../mcp/types';
 import { satisfiesScope } from '../auth/scope';
 import type { AnthropicToolDef } from './anthropic-client';
 
+/**
+ * Lane B7 — the panel agent NEVER publishes by itself (see this repo's brief
+ * for that lane): it prepares changes and ends every change request with a
+ * "change card" the owner has to click Aprobar on (`change-card.ts`,
+ * `pending-changes.ts`, `routes/api/chat/approve`). `publish`/`unpublish`
+ * moving production without that click would defeat the entire point — and
+ * would also reopen exactly the prompt-injection risk the brief calls out
+ * (an inquiry telling the model to "publish X" would have nothing left
+ * stopping it). Excluded at TWO points, deliberately redundant: not
+ * advertised in `toAnthropicTools()` below (so a well-behaved model never
+ * even considers calling it), AND refused in `runTool` below if it's called
+ * anyway (a real model only calls tools it was offered, but nothing here
+ * relies on that — a scripted/adversarial caller, or this app's own test
+ * stub, could call it directly with the full tool name regardless of what
+ * was advertised, so the actual enforcement boundary has to be server-side,
+ * exactly like the scope check below it already is). The tool REGISTRY
+ * itself (`mcp/tools/index.ts`) is untouched — `/api/mcp` (external OAuth
+ * clients: Claude Desktop, ChatGPT) still sees and can call `publish`/
+ * `unpublish` exactly as before; this exclusion is local to this bridge,
+ * which only this chat loop (`agent.ts`) ever calls.
+ */
+const CHAT_EXCLUDED_TOOLS = new Set(['publish', 'unpublish']);
+
 export function toAnthropicTools(): AnthropicToolDef[] {
-	return allTools.map((t) => ({
-		name: t.name,
-		description: t.description,
-		input_schema: t.inputSchema
-	}));
+	return allTools
+		.filter((t) => !CHAT_EXCLUDED_TOOLS.has(t.name))
+		.map((t) => ({
+			name: t.name,
+			description: t.description,
+			input_schema: t.inputSchema
+		}));
 }
 
 /**
@@ -110,6 +135,28 @@ export async function runTool(
 	args: Record<string, unknown>,
 	ctx: ToolContext
 ): Promise<ToolRunOutcome> {
+	if (CHAT_EXCLUDED_TOOLS.has(name)) {
+		// The real enforcement point — see this file's header comment above
+		// `CHAT_EXCLUDED_TOOLS`. Phrased for the model to relay to the
+		// person, in the same voice as the rest of this app's tool-refusal
+		// messages (compare the scope-refusal message just below).
+		return {
+			toolUseId,
+			name,
+			result: {
+				content: [
+					{
+						type: 'text',
+						text:
+							`No puedo usar "${name}" directamente desde el chat — el panel nunca publica solo. Preparé (o voy ` +
+							'a preparar) el cambio como una tarjeta de aprobación; la persona tiene que tocar "Aprobar" ahí ' +
+							'para que se vea en el sitio.'
+					}
+				],
+				isError: true
+			}
+		};
+	}
 	const tool = getTool(name);
 	if (!tool) {
 		return {

@@ -103,7 +103,23 @@ const MARKDOWN_DEMO_TEXT =
 	'y armar listas:\n\n- Primer punto\n- Segundo punto con **negrita** adentro\n- Tercer punto\n\n' +
 	'También funcionan los links, como [la vista previa del sitio](/) — se abren en una pestaña nueva.';
 
-function plans(intent) {
+/** Pulls the real site-relative media path out of the "[Imagen adjunta por el usuario...]" descriptor text block `routes/api/chat/+server.ts` appends alongside an attached image — see that file's header — so a scenario can patch an entry with the REAL uploaded path instead of a fake one. */
+function attachmentPathFromMessage(message) {
+	const blocks = message?.content ?? [];
+	for (const b of blocks) {
+		if (b.type !== 'text' || typeof b.text !== 'string') continue;
+		const m = b.text.match(/url=(\S+)/);
+		if (!m) continue;
+		try {
+			return new URL(m[1]).pathname;
+		} catch {
+			return m[1];
+		}
+	}
+	return null;
+}
+
+function plans(intent, message) {
 	const text = intent.toLowerCase();
 
 	if (text.includes('demo markdown')) {
@@ -133,18 +149,89 @@ function plans(intent) {
 		};
 	}
 
+	// Lane B7: this used to also call `publish` — the panel agent never
+	// publishes on its own anymore (see `chat/tools-bridge.ts`'s
+	// `CHAT_EXCLUDED_TOOLS`); it prepares the change and stops, and
+	// `chat/agent.ts` attaches the change card automatically. The keyword
+	// list keeps "títul del home"/"eyebrow" for continuity with earlier
+	// lanes' own manual testing notes.
+	// Lane B7 — injection/defense-in-depth test: simulates a MODEL (not the
+	// harness) actually attempting to call `publish` directly, e.g. as if
+	// convinced by injected content. `publish` is never advertised to this
+	// chat's tool list, but a scripted/adversarial caller can still name it
+	// explicitly — this proves `tools-bridge.ts`'s `runTool` refuses it
+	// server-side regardless, not just that a well-behaved model never
+	// tries. Trigger phrase deliberately doesn't overlap the ordinary
+	// "públic"/"eyebrow" scenario above.
+	if (text.includes('probá publicar directo')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [{ name: 'publish', input: { collection: 'homeHero' } }],
+			closingText: (toolResults) => `No pude: ${excerpt(toolResults[0])}`
+		};
+	}
+
+
 	if (text.includes('públic') || text.includes('publica') || text.includes('título del home') || text.includes('titulo del home') || text.includes('eyebrow')) {
 		return {
 			kind: 'tool-then-text',
 			steps: [
 				{
 					name: 'update_entry',
-					input: { collection: 'homeHero', patch: { eyebrow: 'Estudio creativo — demo Lane B6' }, note: 'Lane B6: demo de chat en streaming' }
-				},
-				{ name: 'publish', input: { collection: 'homeHero' } }
+					input: { collection: 'homeHero', patch: { eyebrow: 'Estudio creativo — demo Lane B7' }, note: 'Lane B7: demo de tarjeta de cambios' }
+				}
 			],
-			closingText: () => 'Listo — cambié el eyebrow del home y ya lo publiqué. Debería verse en el sitio ahora mismo.'
+			closingText: () => 'Listo, ya preparé el cambio en la etiqueta de arriba del título del home. Revisá la tarjeta para aprobarlo.'
 		};
+	}
+
+	// Lane B7 — matches the brief's own worked example ("Cambiá 'Hola, somos
+	// Moco' por 'Hola, mocosos'"): a SINGLE update_entry call, no
+	// clarifying question about how to split the line — proves the "decide
+	// implementation, don't ask" system-prompt rule end-to-end against the
+	// harness (a real model's actual judgment on the split still needs a
+	// live key, see system-prompt.ts's header).
+	if (text.includes('mocosos')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [
+				{
+					name: 'update_entry',
+					input: {
+						collection: 'homeHero',
+						patch: { headlineLines: ['Hola,', 'mo', 'cosos'] },
+						note: 'Lane B7: pedido por chat, sin preguntar cómo dividir la línea'
+					}
+				}
+			],
+			closingText: () => 'Cambié el título grande del inicio a "Hola, mocosos". Revisá la tarjeta de arriba para aprobarlo.'
+		};
+	}
+
+	// Lane B7 — "Agregá esta imagen a Sergio Castiglione": pulls the
+	// already-uploaded attachment's real site-relative path out of the same
+	// user turn (see `attachmentPathFromMessage` below) and patches the
+	// project's cover with it — no re-upload, matching what
+	// `system-prompt.ts` tells a real model about attached images.
+	if (text.includes('sergio') || text.includes('castiglione')) {
+		const path = attachmentPathFromMessage(message);
+		if (path) {
+			return {
+				kind: 'tool-then-text',
+				steps: [
+					{
+						name: 'update_entry',
+						input: {
+							collection: 'projects',
+							slug: 'sergio-castiglione',
+							patch: { cover: path },
+							note: 'Lane B7: imagen nueva pedida por chat'
+						}
+					}
+				],
+				closingText: () => 'Listo, actualicé la portada del proyecto de Sergio Castiglione con la imagen que mandaste. Revisá la tarjeta de arriba para aprobarlo.'
+			};
+		}
 	}
 
 	return {
@@ -241,7 +328,7 @@ async function handleMessages(req, res, body) {
 
 	const messages = Array.isArray(payload.messages) ? payload.messages : [];
 	const { index: intentIndex, text: intentText } = lastUserIntent(messages);
-	const plan = plans(intentText);
+	const plan = plans(intentText, messages[intentIndex]);
 	const stepsAlreadyRun = toolStepsSince(messages, intentIndex);
 
 	res.writeHead(200, {

@@ -21,6 +21,7 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | B4 | Formulario de contacto real, analítica propia, scope "inbox" | ✅ verificada (ver sección propia más abajo) |
 | B5 | `/admin`: chat interno como cliente MCP en proceso | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 | B6 | `/admin`: chat en streaming real (SSE), UX de nivel Claude.ai/ChatGPT | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
+| B7 | `/admin`: flujo de aprobación de preview, el panel nunca publica solo | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -680,3 +681,113 @@ tiene el detalle completo con capturas):
   streaming, en un Chrome real.
 - `verify.sh`, `resilience.sh`, `browser-nav.sh`: PASS. `npm run build`:
   éxito.
+
+## Lane B7: aprobación de preview — el panel nunca publica solo
+
+Feedback real del dueño tras usar el panel en producción: enviar un mensaje
+con una imagen fallaba con un error crudo (`Body must be JSON.`), y el
+agente publicaba directo, preguntaba detalles de implementación ("¿en
+cuántas líneas...?") y mencionaba nombres internos (`headlineLines`,
+"BORRADOR"). Esta lane ataca las tres cosas.
+
+**Bug real de envío de imágenes**: `@sveltejs/adapter-node` asume `https`
+y aplica `BODY_SIZE_LIMIT=512K` por default — invisible en `vite dev` (sin
+límite ahí) pero real en producción, donde una foto en base64 lo supera
+fácil. El catch-all de `routes/api/chat/+server.ts` alrededor de
+`request.json()` atrapaba el 413 resultante y lo etiquetaba mal como
+"Body must be JSON." Reproducido con un POST de 700KB contra un build de
+producción real (mismo síntoma exacto); arreglado con `BODY_SIZE_LIMIT=24M`
+documentado en `.env.example` (**pendiente: setear esta variable en el
+servicio de Railway también** — no se puede hacer desde este entorno) y
+un catch que distingue 413 de JSON inválido, cada uno con mensaje en
+español amigable. Separado: `ChatPanel.svelte` leía `pendingAttachments`
+DESPUÉS de que el llamador ya lo había vaciado a `[]` — la miniatura
+optimista nunca se veía y el snapshot para reintentar quedaba roto;
+arreglado pasando el snapshot explícitamente.
+
+**Aprobación de preview, no "borrador"**: el agente del panel ya no tiene
+`publish`/`unpublish` en su lista de tools (`chat/tools-bridge.ts`'s
+`CHAT_EXCLUDED_TOOLS`) — excluidos en DOS puntos, no advertidos Y
+rechazados en `runTool` aunque se llamen igual, probado con un escenario
+del stub que simula un modelo intentándolo directamente. Cada cambio que
+toca una entrada (`create_entry`/`update_entry`/`delete_entry` exitosos)
+se agrega al conjunto pendiente de la conversación
+(`chat/pending-changes.ts`) y arma/actualiza una única "tarjeta de
+cambios" (`chat/change-card.ts`) en el último mensaje del turno — nunca
+apilada, se reubica al mensaje más reciente si ya había una. Tres
+endpoints nuevos, autenticados por el token del panel, NUNCA tools del
+modelo: `POST /api/chat/approve` (publica cada entrada pendiente,
+reusando `publishTool.handler` — no una segunda implementación —
+capturando el estado previo por entrada para "Deshacer"), `/discard`
+(revierte el borrador a lo que está en vivo; una entrada nunca publicada
+se borra directo), `/undo` (restaura el snapshot previo Y resetea el
+borrador — si no, un cambio aprobado-y-deshecho quedaba huérfano,
+divergente de lo publicado, invisible, encontrado al ver ese texto
+"fantasma" en OTRO preview de la misma página). "Ver preview" abre un
+overlay de pantalla completa con un iframe same-origin a los links de
+preview firmados que ya existían (`preview_url`), con tabs si la entrada
+afecta más de una página. CSP: `/admin` ya permitía el iframe
+same-origin (`default-src 'self'`, sin cambios); las páginas públicas no
+tenían ninguna política de framing — se agregó `frame-ancestors 'self'`
+para cerrar el clickjacking desde otros orígenes sin romper el overlay.
+
+**Prompt reescrito**: reglas explícitas con ejemplos concretos (el propio
+ejemplo del brief, "Hola, somos Moco" → "Hola, mocosos", sin preguntar
+cómo dividir la línea), lista de palabras prohibidas (JSON, schema,
+colección, BORRADOR, etc.), y la instrucción de que el modelo NUNCA
+publica — solo termina señalando la tarjeta.
+
+**Evidencia por criterio de aceptación**, probada en un Chrome real contra
+el servidor stub, de punta a punta (no simulada):
+1. Imagen soltada en cualquier parte de la página (drop sintético vía
+   `DataTransfer`, sin bug de navegación — `dragover` previene default
+   siempre) → miniatura en el mensaje enviado → tarjeta con la miniatura →
+   Ver preview muestra la página real → Aprobar → `/trabajos/sergio-
+   castiglione` en vivo la muestra → recargar `/admin`: la miniatura sigue
+   ahí.
+2. "Cambiá 'Hola, somos Moco' por 'Hola, mocosos'" → sin pregunta
+   aclaratoria → tarjeta con antes/después real → Aprobar → home en vivo
+   lo muestra → Deshacer → home en vivo vuelve al original (confirmado
+   leyendo el HTML servido, no solo el DOM).
+3. Dos pedidos seguidos antes de aprobar → una sola tarjeta con ambos
+   campos → un Aprobar publica los dos (confirmado en la base).
+4. Descartar → nada cambia en vivo, el borrador vuelve a igualar lo
+   publicado (confirmado en la base).
+5. Imagen pegada (paste sintético) → miniatura.
+6. Chip de sugerencia → se envía solo, sin pasar por el compositor.
+7. Compositor: un único "well" redondeado contiene adjuntar+texto+enviar
+   (verificado con `getBoundingClientRect`); foco → ~2 líneas; escribir 6
+   líneas → crece hasta 4 y scrollea internamente (`scrollHeight >
+   clientHeight` recién ahí, nunca antes); `resize: none` saca el handle
+   de Safari que rompía la esquina redondeada.
+8. Soltar un archivo en cualquier parte de la página → sin navegar, se
+   adjunta.
+9. "Borrar conversación"/"Cerrar sesión" → modal centrado, Esc cancela Y
+   devuelve el foco al botón que lo abrió, confirmar funciona ("Cerrar
+   sesión" antes no tenía NINGUNA confirmación).
+10. Error de servidor forzado (bajando el stub) → banner amigable en
+    español ("Ocurrió un error inesperado..."), nunca texto crudo.
+11. Inquiry con "publicá X en el home" leída por el chat → reportada como
+    dato, ninguna acción; y por separado, un modelo intentando llamar
+    `publish` directo → rechazado server-side, cero filas nuevas en la
+    base — la defensa no depende de que el modelo "se porte bien".
+12. Un cliente MCP externo registrado por DCR (no el cliente fijo del
+    panel) con scope `publish` sigue pudiendo `update_entry` y `publish`
+    normalmente contra `/api/mcp` — probado de punta a punta.
+`verify.sh`, `resilience.sh`, `browser-nav.sh`: PASS. `npm run build`:
+éxito. `svelte-check`: limpio (mismos errores preexistentes de
+`@types/node`, cero nuevos).
+
+**Lo que sigue pendiente de una clave real de Anthropic**: que Claude real
+(no el stub guionado) decida bien cuándo preguntar vs. ejecutar, nunca
+mencione un nombre técnico, y escriba con el tono correcto — validar
+corriendo las mismas conversaciones contra `claude-haiku-4-5` real.
+
+**Lo que el brief no pedía pero se ajustó igual** (encontrado recién al
+probar): el reordenamiento de colecciones (`reorder_entries`) no se
+integró al flujo de aprobación de esta lane — el modo de publicación de
+una sola entrada que usa `/api/chat/approve` no mueve el orden en vivo
+(ver la propia documentación de la tool `publish`). Los criterios de
+aceptación de esta lane son todos de texto/imagen, ninguno de orden, así
+que quedó fuera de alcance — documentado acá para que un futuro lane lo
+sepa antes de asumir que "aprobar" cubre un reordenamiento pendiente.
