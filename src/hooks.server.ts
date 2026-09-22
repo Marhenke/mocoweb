@@ -160,9 +160,33 @@ async function sha256Base64(text: string): Promise<string> {
 
 const INLINE_SCRIPT_RE = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
 
+/**
+ * Lane B7 — every PUBLIC page gets `frame-ancestors 'self'`: the preview-
+ * approval flow's "Ver preview" embeds a real public page (e.g.
+ * /trabajos/sergio-castiglione?__preview=...) in an iframe INSIDE /admin,
+ * same origin — which a public page with no `frame-ancestors` at all (the
+ * state of every non-admin route before this lane) already permits, so
+ * nothing here is required to make that overlay work. What WAS missing:
+ * with no policy at all, any OTHER origin could iframe these pages too
+ * (clickjacking) — `'self'` keeps the admin's own embed working while
+ * closing that off, without adopting the admin's much stricter
+ * `frame-ancestors 'none'` (which would also block /admin's own use of
+ * itself). Deliberately narrow: only this one directive, not the fuller
+ * CSP `ADMIN_CSP` uses — auditing a site-wide `default-src`/`script-src`
+ * for every public route (Google Fonts, the JSON-LD block on / and
+ * /trabajos/{slug}, etc.) is out of scope here, same reasoning
+ * `addAdminSecurityHeaders`'s own header already gives for not turning on
+ * SvelteKit's site-wide `kit.csp` option.
+ */
+function addPublicFrameHeader(response: Response): Response {
+	response.headers.append('Content-Security-Policy', "frame-ancestors 'self'");
+	response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+	return response;
+}
+
 async function addAdminSecurityHeaders(response: Response, pathname: string): Promise<Response> {
 	if (pathname !== '/admin' && !pathname.startsWith('/admin/') && pathname !== '/api/chat') {
-		return response;
+		return addPublicFrameHeader(response);
 	}
 
 	const contentType = response.headers.get('content-type') ?? '';
