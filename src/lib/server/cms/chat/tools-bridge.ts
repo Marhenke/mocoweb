@@ -32,6 +32,7 @@ import { getTool, allTools } from '../mcp/tools/index';
 import type { ToolContext, ToolResult } from '../mcp/types';
 import { satisfiesScope } from '../auth/scope';
 import type { AnthropicToolDef } from './anthropic-client';
+import { CHAT_ONLY_TOOLS } from './chat-only-tools';
 
 /**
  * Lane B7 — the panel agent NEVER publishes by itself (see this repo's brief
@@ -57,13 +58,22 @@ import type { AnthropicToolDef } from './anthropic-client';
 const CHAT_EXCLUDED_TOOLS = new Set(['publish', 'unpublish']);
 
 export function toAnthropicTools(): AnthropicToolDef[] {
-	return allTools
+	const fromRegistry = allTools
 		.filter((t) => !CHAT_EXCLUDED_TOOLS.has(t.name))
 		.map((t) => ({
 			name: t.name,
 			description: t.description,
 			input_schema: t.inputSchema
 		}));
+	// Lane B9 — chat-only tools (`chat-only-tools.ts`) are never part of the
+	// shared `mcp/tools/index.ts` registry `/api/mcp` also reads from, so they
+	// have to be appended here explicitly rather than just being un-excluded.
+	const chatOnly = Object.values(CHAT_ONLY_TOOLS).map((t) => ({
+		name: t.name,
+		description: t.description,
+		input_schema: t.inputSchema
+	}));
+	return [...fromRegistry, ...chatOnly];
 }
 
 /**
@@ -93,7 +103,8 @@ const TOOL_ACTIVITY_LABELS: Record<string, string> = {
 	query_analytics: 'Revisando las estadísticas de visitas…',
 	list_inquiries: 'Leyendo los mensajes de contacto…',
 	get_inquiry: 'Leyendo el mensaje de contacto…',
-	mark_inquiry_read: 'Marcando el mensaje como leído…'
+	mark_inquiry_read: 'Marcando el mensaje como leído…',
+	offer_undo_last_change: 'Revisando si se puede deshacer lo último…'
 };
 
 export function toolActivityLabel(name: string): string {
@@ -133,8 +144,27 @@ export async function runTool(
 	toolUseId: string,
 	name: string,
 	args: Record<string, unknown>,
-	ctx: ToolContext
+	ctx: ToolContext,
+	conversationId: string
 ): Promise<ToolRunOutcome> {
+	const chatOnlyTool = CHAT_ONLY_TOOLS[name];
+	if (chatOnlyTool) {
+		// Lane B9 — a chat-only tool never touches the general registry/scope
+		// check below: it doesn't need one (see `chat-only-tools.ts`'s header —
+		// read-only over this conversation's own `last_published` slot, nothing
+		// an OAuth scope was ever meant to gate).
+		try {
+			const result = await chatOnlyTool.handler(args, conversationId);
+			return { toolUseId, name, result: wrapUntrusted(result) };
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				toolUseId,
+				name,
+				result: { content: [{ type: 'text', text: `Error interno en "${name}": ${message}` }], isError: true }
+			};
+		}
+	}
 	if (CHAT_EXCLUDED_TOOLS.has(name)) {
 		// The real enforcement point — see this file's header comment above
 		// `CHAT_EXCLUDED_TOOLS`. Phrased for the model to relay to the
@@ -169,6 +199,17 @@ export async function runTool(
 		};
 	}
 	if (!satisfiesScope(ctx.scope, tool.scope)) {
+		// Lane B9 — the owner's own feedback after testing: the agent must
+		// NEVER talk about `/admin`, "scopes", "permissions", or "logging in"
+		// — those are internal, technical, and wrong-sounding in the owner's
+		// own terms (this exact wording, mentioning "/admin" and "iniciar
+		// sesión", is what produced the confusing "you'd have to log in again
+		// at /admin with publish permissions" reply this lane's brief opens
+		// with). This connection's access level is fixed at login time and
+		// this chat has no action that changes it, so the honest, plain-
+		// language answer is simply that this can't be done from here right
+		// now — never a literal scope name, never a suggested workaround that
+		// doesn't exist.
 		return {
 			toolUseId,
 			name,
@@ -177,9 +218,8 @@ export async function runTool(
 					{
 						type: 'text',
 						text:
-							`No tengo permiso para usar "${name}" — requiere el permiso "${tool.scope}" y este panel ` +
-							`fue autorizado solo con "${ctx.scope}". Pedile a quien administra el sitio que vuelva a ` +
-							'iniciar sesión en /admin eligiendo un nivel de acceso mayor, si esto era intencional.'
+							`No puedo hacer eso desde acá ahora mismo — esta conexión del panel no tiene el nivel de acceso ` +
+							'necesario para esa acción. Si te parece que debería poder, avisale a quien mantiene el sitio.'
 					}
 				],
 				isError: true

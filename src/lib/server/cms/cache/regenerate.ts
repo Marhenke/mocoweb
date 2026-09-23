@@ -30,23 +30,53 @@ interface RenderedPage {
 	contentType: string;
 }
 
+/**
+ * Lane B9 — `127.0.0.1` first, `localhost` as a fallback, never the other
+ * way around. Found while testing this lane's Aprobar flow against `vite
+ * dev` (what `dev.sh` runs): Vite's dev server, with no `--host` flag,
+ * binds ONLY the IPv6 loopback (`::1`) — confirmed with `lsof -iTCP
+ * -sTCP:LISTEN`, showing `TCP localhost:5180` as an IPv6 socket and nothing
+ * on `127.0.0.1:5180` at all — so the ORIGINAL hardcoded `127.0.0.1`
+ * self-fetch always failed to connect there (`ECONNREFUSED`), which this
+ * function's catch below silently turned into "render failed": every
+ * publish/unpublish/undo in dev was refused and rolled back, 100% of the
+ * time, regardless of `PORT` being correct.
+ *
+ * The first fix tried was switching the literal to `localhost` outright —
+ * wrong, caught by `.migration/verify.sh` itself: `adapter-node` (what
+ * `verify.sh` builds and runs, and what Railway runs in production) binds
+ * `127.0.0.1` FINE, so that self-fetch already succeeded there, on the
+ * FIRST try, before either literal is tried — but the *value* a self-fetch
+ * resolves to becomes part of the rendered page (`event.url.origin`, baked
+ * into `<link rel="mcp-server">` and the JSON-LD `url`, per
+ * `discovery/build.ts`), so switching the literal changed 7 of the 10
+ * baselined routes' bytes even though the connection itself never needed
+ * fixing there. Trying `127.0.0.1` FIRST and only falling back to
+ * `localhost` on a connection failure keeps every environment where
+ * `127.0.0.1` already works (`node build`/`verify.sh`, Railway) byte-for-byte
+ * identical to before this lane — confirmed by re-running `verify.sh` after
+ * this change with zero diffs, no re-baselining — while still fixing the
+ * one environment (`vite dev`) where it didn't.
+ */
 async function renderPath(path: string): Promise<RenderedPage | null> {
 	const port = process.env.PORT || '3000';
-	const url = `http://127.0.0.1:${port}${path}`;
-	try {
-		const res = await fetch(url, { headers: internalRenderHeaders() });
-		if (!res.ok) return null;
-		const body = await res.text();
-		const contentType = res.headers.get('content-type') ?? 'text/html; charset=utf-8';
-		return { body, contentType };
-	} catch {
-		// The regeneration self-fetch failing (e.g. this process isn't
-		// actually listening on PORT yet, or DNS/socket hiccup) must not
-		// throw out of publish/unpublish — the DB write (the thing that
-		// actually matters) already succeeded. A failed regeneration just
-		// means this path falls back to a live, uncached render next visit.
-		return null;
+	for (const host of ['127.0.0.1', 'localhost']) {
+		try {
+			const res = await fetch(`http://${host}:${port}${path}`, { headers: internalRenderHeaders() });
+			if (!res.ok) return null;
+			const body = await res.text();
+			const contentType = res.headers.get('content-type') ?? 'text/html; charset=utf-8';
+			return { body, contentType };
+		} catch {
+			// Connection failure on THIS host — try the next one. Only after
+			// every candidate host fails (see the loop falling through below)
+			// is this treated as a real regeneration failure, which must not
+			// throw out of publish/unpublish — the DB write (the thing that
+			// actually matters) already succeeded. A failed regeneration just
+			// means this path falls back to a live, uncached render next visit.
+		}
 	}
+	return null;
 }
 
 export interface RegenerateResult {

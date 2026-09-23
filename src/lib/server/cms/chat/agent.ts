@@ -53,6 +53,20 @@ import type { ToolContext } from '../mcp/types';
  * text, which `tools-bridge.ts`'s `wrapUntrusted` prefixes with the
  * untrusted-data marker.
  */
+/**
+ * Lane B9 — true when a successful `offer_undo_last_change` call
+ * (`chat-only-tools.ts`) reported something IS undoable. `agent.ts` turns
+ * this into the `tool_result` SSE event's `offerUndo` flag, which
+ * `ChatPanel.svelte` uses to render a clickable "Deshacer" affordance
+ * directly on that assistant reply — never anything this function or the
+ * tool call itself performs.
+ */
+function isUndoAvailable(name: string, structuredContent: unknown): boolean {
+	if (name !== 'offer_undo_last_change') return false;
+	if (!structuredContent || typeof structuredContent !== 'object') return false;
+	return (structuredContent as Record<string, unknown>).available === true;
+}
+
 function extractTouchedRef(name: string, structuredContent: unknown): PendingEntryRef | null {
 	if (name !== 'create_entry' && name !== 'update_entry' && name !== 'delete_entry') return null;
 	if (!structuredContent || typeof structuredContent !== 'object') return null;
@@ -139,7 +153,7 @@ export type AgentStreamEvent =
 	| { kind: 'user_message'; row: ChatMessageRow }
 	| { kind: 'text_delta'; text: string }
 	| { kind: 'tool_start'; id: string; name: string; label: string }
-	| { kind: 'tool_result'; id: string; name: string; isError: boolean }
+	| { kind: 'tool_result'; id: string; name: string; isError: boolean; offerUndo?: boolean }
 	| { kind: 'assistant_message'; row: ChatMessageRow }
 	| { kind: 'stopped'; row: ChatMessageRow }
 	/** Lane B8 — the site's one pending change set changed (grew, most likely). Not tied to any row — the persistent pinned bar renders straight from `card`. */
@@ -448,8 +462,9 @@ export async function runChatTurnStream(params: {
 		const toolUses = content.filter(isToolUseBlock);
 		const toolResultBlocks: AnthropicContentBlock[] = [];
 		for (const toolUse of toolUses) {
-			const outcome = await runTool(toolUse.id, toolUse.name, toolUse.input, params.ctx);
-			emit({ kind: 'tool_result', id: outcome.toolUseId, name: outcome.name, isError: outcome.result.isError ?? false });
+			const outcome = await runTool(toolUse.id, toolUse.name, toolUse.input, params.ctx, params.conversationId);
+			const offerUndo = !outcome.result.isError && isUndoAvailable(outcome.name, outcome.result.structuredContent);
+			emit({ kind: 'tool_result', id: outcome.toolUseId, name: outcome.name, isError: outcome.result.isError ?? false, offerUndo });
 			const text = outcome.result.content.map((c) => c.text).join('\n');
 			toolResultBlocks.push({
 				type: 'tool_result',

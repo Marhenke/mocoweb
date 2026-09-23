@@ -245,9 +245,38 @@ async function rewritePreviewResponse(response: Response, token: string): Promis
 	const contentType = response.headers.get('content-type') ?? '';
 	if (!contentType.includes('text/html')) return response;
 	const body = await response.text();
+	const rewritten = injectPreviewToken(body, token);
 	const headers = new Headers(response.headers);
 	headers.set('Referrer-Policy', 'no-referrer');
-	return new Response(injectPreviewToken(body, token), { status: response.status, headers });
+	// Lane B9 — found while chasing an unrelated bug (the preview banner's
+	// height, measured client-side, never updated): hydration was silently
+	// NOT RUNNING AT ALL on any preview page, full stop — confirmed with
+	// `curl`, deterministically, on the UNMODIFIED pre-B9 code too, so this
+	// predates this lane. Root cause: `injectPreviewToken` above makes the
+	// body LONGER (every same-origin link gains a `?__preview=<token>` query
+	// string), but `headers` here started as `new Headers(response.headers)`
+	// — a copy of the ORIGINAL response's headers, `Content-Length` included,
+	// still declaring the PRE-rewrite byte count. Handing a longer body to
+	// `new Response()` alongside an explicit `Content-Length` that undercounts
+	// it doesn't get silently corrected: confirmed with a temporary
+	// `console.log` around this exact call that the rewritten string was the
+	// expected length end-to-end (ending in a proper `</html>`), while `curl`
+	// against the live server deterministically received exactly the SHORTER,
+	// stale `Content-Length` worth of bytes — cut off mid-attribute inside the
+	// embedded hydration payload, always missing the trailing `<script>`
+	// entirely. That single missing script is SvelteKit's only hydration
+	// entry point, so every preview page loaded inert: no client-side nav
+	// interception (`+layout.svelte`'s `interceptPreviewLink`, the OTHER half
+	// of "stay in preview across navigation" already implemented for this
+	// exact lane's acceptance criteria), no reactive Svelte state, nothing.
+	// Deleting the stale header (rather than recomputing a byte count by
+	// hand, which would also have to get multi-byte characters like the
+	// banner's own 👁️ right) lets `Response`/the HTTP layer derive the
+	// correct framing from the ACTUAL body being sent, same as any other
+	// dynamically-sized response in this codebase that doesn't set the
+	// header itself.
+	headers.delete('content-length');
+	return new Response(rewritten, { status: response.status, headers });
 }
 
 async function addAdminSecurityHeaders(response: Response, pathname: string): Promise<Response> {

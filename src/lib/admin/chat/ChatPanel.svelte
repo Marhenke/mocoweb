@@ -73,6 +73,16 @@
 	let openChange = $state<ChangeCard | null>(null);
 	let actionBusy = $state(false);
 	let previewOpen = $state(false);
+	// Lane B9 — the bar now clears the instant there's nothing open (see
+	// `open-change-set.ts`'s header), so a successful Aprobar needs its OWN,
+	// separate, brief confirmation — never the bar itself lingering. `null`
+	// when nothing to show; dismisses itself on a short timeout, on the next
+	// message send (`handleSend`), or the instant a NEW pending change
+	// arrives (`pending_change` SSE case) — "no stacking, still exactly one
+	// bar" from the brief applies here too: a confirmation and a real
+	// pending-change bar never show at the same time.
+	let approvalToast = $state(false);
+	let approvalToastTimer: ReturnType<typeof setTimeout> | null = null;
 	// Lane B7 — page-wide drag-and-drop (moved here from `Composer.svelte`;
 	// see that component's header). `pageDragDepth` is a plain counter, not
 	// `$state`, because `dragenter`/`dragleave` fire once per DOM boundary
@@ -396,7 +406,15 @@
 						// through this chip.
 						const id = d.id as string;
 						if (tools[id]) {
-							tools = { ...tools, [id]: { ...tools[id], status: 'done' } };
+							// Lane B9 — `offerUndo` rides along on this same event (see
+							// `agent.ts`'s `isUndoAvailable`): true only for a successful
+							// `offer_undo_last_change` call that found something
+							// undoable. Threaded onto the tool's own activity record so
+							// `MessageBubble.svelte` can render a click-to-undo action
+							// directly on the reply that offered it — the model never
+							// runs the undo itself, only this flag exists so the OWNER
+							// can.
+							tools = { ...tools, [id]: { ...tools[id], status: 'done', offerUndo: (d.offerUndo as boolean) === true } };
 						}
 						updateTick++;
 						break;
@@ -420,6 +438,10 @@
 							// Keep the overlay (if open) showing the freshest card data.
 							if (!openChange) previewOpen = false;
 						}
+						// Lane B9 — new prepared work replaces a still-showing
+						// confirmation toast cleanly instead of stacking with it (the
+						// brief: "still exactly one bar").
+						if (openChange) dismissApprovalToast();
 						break;
 					}
 					case 'done': {
@@ -484,6 +506,10 @@
 		if (sending) return;
 		const text = chatInput.trim();
 		if (!text && pendingAttachments.length === 0) return;
+		// Lane B9 — "dismisses itself... when the owner sends the next
+		// message" (the brief, verbatim) — the conversation continuing is
+		// itself the signal that the confirmation has served its purpose.
+		dismissApprovalToast();
 		chatInput = '';
 		const attachmentsSnapshot = pendingAttachments;
 		pendingAttachments = [];
@@ -576,6 +602,12 @@
 	function applyOpenChangeResult(data: Record<string, unknown>): void {
 		openChange = (data.card as ChangeCard | null | undefined) ?? null;
 		if (!openChange) previewOpen = false;
+		// Lane B9 — the bar and the confirmation toast are mutually exclusive
+		// (never stacked, per the brief) — any action that leaves real open
+		// work behind (e.g. clicking Deshacer, which re-adds the entry to the
+		// pending set) supersedes a still-showing toast from an earlier
+		// Aprobar.
+		if (openChange) dismissApprovalToast();
 		const errors = data.errors as string[] | undefined;
 		if (data.ok === false) {
 			chatError =
@@ -588,8 +620,8 @@
 		}
 	}
 
-	async function postCardAction(path: string): Promise<void> {
-		if (actionBusy) return;
+	async function postCardAction(path: string): Promise<boolean> {
+		if (actionBusy) return false;
 		actionBusy = true;
 		try {
 			const res = await authedFetch(path, { method: 'POST' });
@@ -602,25 +634,77 @@
 			if (!res.ok && !('card' in data)) {
 				chatError =
 					(data.error_description as string | undefined) ?? 'No se pudo completar la acción. Probá de nuevo.';
-				return;
+				return false;
 			}
 			applyOpenChangeResult(data);
+			return data.ok !== false;
 		} catch {
 			chatError = 'No se pudo conectar con el servidor. Revisá tu conexión y probá de nuevo.';
+			return false;
 		} finally {
 			actionBusy = false;
 		}
 	}
 
-	function handleCardApprove(): void {
-		void postCardAction('/api/chat/approve');
+	// Lane B9 — shows for a fixed, short window and clears itself; also
+	// cleared early by `dismissApprovalToast` (next message sent, or a new
+	// change replacing it — see the `pending_change` SSE case and
+	// `handleSend`).
+	function showApprovalToast(): void {
+		approvalToast = true;
+		if (approvalToastTimer) clearTimeout(approvalToastTimer);
+		approvalToastTimer = setTimeout(() => {
+			approvalToastTimer = null;
+			approvalToast = false;
+		}, 6000);
+	}
+	function dismissApprovalToast(): void {
+		if (approvalToastTimer) {
+			clearTimeout(approvalToastTimer);
+			approvalToastTimer = null;
+		}
+		approvalToast = false;
+	}
+
+	async function handleCardApprove(): Promise<void> {
+		// Lane B9 — the bar itself clears the instant the server confirms
+		// (`postCardAction` → `applyOpenChangeResult` sets `openChange` to
+		// whatever's left, null if nothing is), per the brief: Aprobar must
+		// never leave the bar sitting there. The toast is a SEPARATE, brief,
+		// dismissible stand-in for "yes, that worked, and here's Deshacer if
+		// you want it" — shown only once nothing else is left open, so it
+		// never appears alongside a still-pending remainder of a partial
+		// failure (see `routes/api/chat/approve`'s header on partial
+		// failure).
+		const ok = await postCardAction('/api/chat/approve');
+		if (ok && !openChange) showApprovalToast();
 	}
 	function handleCardDiscard(): void {
+		dismissApprovalToast();
 		void postCardAction('/api/chat/discard');
 	}
 	function handleCardUndo(): void {
 		void postCardAction('/api/chat/undo');
 	}
+
+	// Lane B9 — the click behind the inline "Deshacer" the agent OFFERS (never
+	// executes) when the owner asks in chat to undo the last approved change
+	// (`offer_undo_last_change`, see `chat-only-tools.ts`). Reuses the exact
+	// same `/api/chat/undo` endpoint the old persistent bar's Deshacer button
+	// called — there is still only ONE way anything gets undone, this is
+	// just a second place in the UI that can trigger it. On success the
+	// returned card (now 'pending' again, ready for a fresh Aprobar) replaces
+	// `openChange` exactly like every other card action; the offer itself is
+	// cleared from `tools` so the button can't be clicked a second time for
+	// something that no longer applies.
+	async function handleInlineUndo(toolId: string): Promise<void> {
+		const ok = await postCardAction('/api/chat/undo');
+		if (ok) {
+			dismissApprovalToast();
+			if (tools[toolId]) tools = { ...tools, [toolId]: { ...tools[toolId], offerUndo: false } };
+		}
+	}
+
 	function handleCardPreview(): void {
 		if (!openChange) return;
 		previewOpen = true;
@@ -709,6 +793,8 @@
 				{liveAnnouncement}
 				{updateTick}
 				onRetry={handleRetry}
+				onInlineUndo={handleInlineUndo}
+				undoBusy={actionBusy}
 			/>
 		{/if}
 	</div>
@@ -718,11 +804,13 @@
 	{/if}
 
 	<!--
-		Lane B8 — the persistent pinned bar: exactly one, never a message in
-		the thread above. Sits right above the composer so it's visible
-		whenever open work exists, on every screen size, and disappears the
-		instant `openChange` is null (Aprobar-published-and-not-undoable,
-		Descartar, or nothing ever touched).
+		Lane B8, narrowed in Lane B9 — the persistent pinned bar: exactly one,
+		never a message in the thread above, and for OPEN work only. Sits
+		right above the composer so it's visible whenever there's something
+		pending, on every screen size, and disappears the INSTANT `openChange`
+		is null — Aprobar and Descartar both clear it immediately (see
+		`open-change-set.ts`'s header) rather than leaving a "Publicado ✓"
+		state sitting there.
 	-->
 	{#if openChange}
 		<PendingChangeBar
@@ -733,6 +821,22 @@
 			onDiscard={handleCardDiscard}
 			onUndo={handleCardUndo}
 		/>
+	{:else if approvalToast}
+		<!--
+			Lane B9 — the brief, self-dismissing stand-in for the bar right
+			after a successful Aprobar (see `showApprovalToast`/
+			`dismissApprovalToast` above): never blocks the composer, never
+			stacks with a real pending change, gone on its own timeout or the
+			next message sent. Deshacer here calls the exact same endpoint as
+			the bar's own Deshacer did — this is still the only place a click
+			(never the model) undoes anything.
+		-->
+		<div class="approval-toast" role="status">
+			<span class="toast-text">✓ Publicado</span>
+			<button type="button" class="toast-undo" onclick={handleCardUndo} disabled={actionBusy}>
+				{actionBusy ? 'Deshaciendo…' : 'Deshacer'}
+			</button>
+		</div>
 	{/if}
 
 	<Composer
@@ -872,5 +976,39 @@
 		border-radius: 0.5rem;
 		padding: 0.6rem 0.9rem;
 		font-size: 0.85rem;
+	}
+
+	/* Lane B9 — the brief, self-dismissing confirmation that replaces the
+	   persistent bar right after Aprobar. Deliberately small and quiet
+	   (unlike the bar it replaces) — it's a courtesy notice, not something
+	   that needs the owner's attention the way an open change does. */
+	.approval-toast {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.75rem;
+		padding: 0.5rem 0.9rem;
+		border-top: 1px solid color-mix(in srgb, var(--color-ink) 15%, transparent);
+		background: color-mix(in srgb, var(--color-lime) 18%, var(--color-cream-dark, #e8e2d2));
+		font-size: 0.82rem;
+	}
+	.toast-text {
+		font-weight: 700;
+	}
+	.toast-undo {
+		font-family: inherit;
+		font-size: 0.8rem;
+		font-weight: 600;
+		background: transparent;
+		border: 1px solid color-mix(in srgb, var(--color-ink) 25%, transparent);
+		border-radius: 0.6em;
+		padding: 0.35em 0.8em;
+		min-height: 44px;
+		cursor: pointer;
+		color: var(--color-ink);
+	}
+	.toast-undo:disabled {
+		opacity: 0.55;
+		cursor: default;
 	}
 </style>

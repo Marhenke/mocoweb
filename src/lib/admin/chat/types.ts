@@ -14,6 +14,8 @@ export interface ToolActivity {
 	name: string;
 	label: string;
 	status: ToolStatus;
+	/** Lane B9 — true when this was a successful `offer_undo_last_change` call reporting something IS undoable. Drives the inline "Deshacer" button on the bubble that made this call — see `ChatPanel.svelte`'s `tool_result` handling. */
+	offerUndo?: boolean;
 }
 
 export interface ChangeCardPage {

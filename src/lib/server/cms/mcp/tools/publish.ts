@@ -587,17 +587,54 @@ export const previewUrlTool: ToolDefinition = {
 export async function restorePublishedSnapshot(params: {
 	collectionKey: string;
 	slug: string | null;
-	snapshot: { publishedData: unknown; publishedPosition: number | null; status: string };
+	snapshot: {
+		publishedData: unknown;
+		publishedPosition: number | null;
+		status: string;
+		/** Lane B9 — see `ChangeCardEntry.approvedSnapshot`'s doc comment in `chat/change-card.ts`. */
+		deletedRow?: Record<string, unknown> | null;
+	};
 }): Promise<{ ok: true } | { ok: false; message: string }> {
 	const collection = getCollection(params.collectionKey);
 	if (!collection) return { ok: false, message: collectionNotFoundMessage(params.collectionKey) };
 	const row = await resolveEntry(collection, { slug: params.slug ?? undefined });
+
 	if (!row) {
-		return {
-			ok: false,
-			message: `No entry found in collection "${params.collectionKey}" for slug "${params.slug ?? SINGLETON_SLUG}".`
-		};
+		// Lane B9 — the row genuinely doesn't exist anymore. The only
+		// legitimate reason (as opposed to a stale/bogus undo request): the
+		// approval this is undoing published a PENDING DELETE, which `publish`
+		// removes outright (see this file's `publish` handler, the
+		// `row.pendingDelete` branch) — `approve/+server.ts` captured the whole
+		// row for exactly this case (`snapshot.deletedRow`). Re-`INSERT` it
+		// (not update — there's nothing to update), then run it through the
+		// same render-validate-or-compensate helper every other path here
+		// uses, so an undo that would leave a route unable to render gets
+		// refused and rolled back (re-deleted) instead of silently corrupting
+		// the site, exactly like a normal publish failure would.
+		if (!params.snapshot.deletedRow) {
+			return {
+				ok: false,
+				message: `No entry found in collection "${params.collectionKey}" for slug "${params.slug ?? SINGLETON_SLUG}".`
+			};
+		}
+		const restored = deserializeEntryRow(params.snapshot.deletedRow);
+		// `entries.$inferInsert` types `id` as optional (it has a DB default),
+		// even though `deserializeEntryRow` always sets it explicitly — pin it
+		// to a definite `string` once here rather than fighting that at every
+		// later use.
+		const restoredId: string = restored.id as string;
+		await db.insert(entries).values(restored);
+		const outcome = await publishOrRollback(
+			params.collectionKey,
+			params.slug ? { changedSlug: params.slug } : {},
+			async () => {
+				await db.delete(entries).where(eq(entries.id, restoredId));
+			}
+		);
+		if (!outcome.ok) return { ok: false, message: outcome.message };
+		return { ok: true };
 	}
+
 	const currentSnapshot = {
 		publishedData: row.publishedData,
 		publishedPosition: row.publishedPosition,
@@ -625,6 +662,33 @@ export async function restorePublishedSnapshot(params: {
 	);
 	if (!outcome.ok) return { ok: false, message: outcome.message };
 	return { ok: true };
+}
+
+/**
+ * Reverses the JSON round-trip a full `entries` row takes through
+ * `chat_conversations.last_published` (a jsonb column, see
+ * `chat/pending-changes.ts`): `createdAt`/`updatedAt` come back as ISO
+ * strings (jsonb has no native timestamp type — `JSON.stringify` already
+ * turned the original `Date` objects into strings on the way in, via their
+ * own `toJSON()`), which drizzle's `timestamp()` column type needs as real
+ * `Date` instances again for `db.insert(...).values(...)`. Every other field
+ * round-trips as-is (string/number/boolean/plain object all survive JSON
+ * unchanged).
+ */
+function deserializeEntryRow(raw: Record<string, unknown>): typeof entries.$inferInsert {
+	return {
+		id: raw.id as string,
+		collectionKey: raw.collectionKey as string,
+		slug: raw.slug as string,
+		position: raw.position as number,
+		status: raw.status as string,
+		data: raw.data,
+		publishedData: raw.publishedData ?? null,
+		publishedPosition: (raw.publishedPosition as number | null) ?? null,
+		pendingDelete: false, // it's coming back to life — never re-insert it still flagged for deletion
+		createdAt: new Date(raw.createdAt as string),
+		updatedAt: new Date()
+	};
 }
 
 export const publishTools: ToolDefinition[] = [

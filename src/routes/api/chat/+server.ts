@@ -290,7 +290,14 @@ export const POST: RequestHandler = async ({ request }) => {
 								safeEnqueue(sseFrame('tool_start', { id: event.id, name: event.name, label: event.label }));
 								break;
 							case 'tool_result':
-								safeEnqueue(sseFrame('tool_result', { id: event.id, name: event.name, isError: event.isError }));
+								safeEnqueue(
+									sseFrame('tool_result', {
+										id: event.id,
+										name: event.name,
+										isError: event.isError,
+										offerUndo: event.offerUndo ?? false
+									})
+								);
 								break;
 							case 'assistant_message':
 								safeEnqueue(sseFrame('assistant_message', { row: serializeRow(event.row) }));

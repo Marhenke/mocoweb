@@ -31,8 +31,11 @@
 		liveAnnouncement: string;
 		updateTick: number;
 		onRetry: (bubble: ChatBubble) => void;
+		/** Lane B9 — click-to-undo offered inline on a reply (see `ChatPanel.svelte`'s `handleInlineUndo`), threaded down to `MessageBubble.svelte`. */
+		onInlineUndo: (toolId: string) => void;
+		undoBusy: boolean;
 	}
-	let { bubbles, tools, showTyping, liveAnnouncement, updateTick, onRetry }: Props = $props();
+	let { bubbles, tools, showTyping, liveAnnouncement, updateTick, onRetry, onInlineUndo, undoBusy }: Props = $props();
 
 	let scrollEl: HTMLDivElement | undefined = $state();
 	let bottomAnchor: HTMLDivElement | undefined = $state();
@@ -92,7 +95,7 @@
 			{#if day}
 				<div class="day-separator" role="separator"><span>{day}</span></div>
 			{/if}
-			<MessageBubble {bubble} {tools} {onRetry} />
+			<MessageBubble {bubble} {tools} {onRetry} {onInlineUndo} {undoBusy} />
 		{/each}
 		{#if showTyping}
 			<TypingIndicator />
