@@ -22,6 +22,8 @@ Gate de aceptación: `.migration/verify.sh` — compara las 10 rutas renderizada
 | B5 | `/admin`: chat interno como cliente MCP en proceso | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 | B6 | `/admin`: chat en streaming real (SSE), UX de nivel Claude.ai/ChatGPT | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 | B7 | `/admin`: flujo de aprobación de preview, el panel nunca publica solo | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
+| B8 | `/admin`: un solo conjunto de cambios fijo, preview sin fuga | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
+| B9 | `/admin`: barra solo para trabajo abierto, banner de preview sin tapar, borrar publicado por chat | ✅ verificada salvo el modelo real (ver sección propia más abajo) |
 
 A4 es el gate real: cuando los componentes dejen de leer TypeScript hardcodeado y lean de
 Postgres, `verify.sh` tiene que seguir dando PASS con cero diferencias. Eso prueba que no se
@@ -791,3 +793,178 @@ una sola entrada que usa `/api/chat/approve` no mueve el orden en vivo
 aceptación de esta lane son todos de texto/imagen, ninguno de orden, así
 que quedó fuera de alcance — documentado acá para que un futuro lane lo
 sepa antes de asumir que "aprobar" cubre un reordenamiento pendiente.
+
+## Lane B9: la barra solo para trabajo abierto, el banner de preview sin
+## tapar contenido, y borrar publicado desde el chat
+
+Tres quejas reales del dueño tras usar el panel en producción. (1) La barra
+fija quedaba mostrando "Publicado ✓ · Ver preview · Deshacer" para
+siempre después de Aprobar, ocupando la pantalla mientras seguía
+charlando — `open-change-set.ts` ahora solo construye la tarjeta desde el
+conjunto pendiente (`pending-changes.ts`'s `getPendingChange`); dejó de
+tener un fallback al último publicado, así que la barra desaparece apenas
+no queda nada pendiente, en Aprobar y en Descartar por igual.
+`last_published` (la tabla en sí) sigue existiendo — pasó a alimentar dos
+cosas nuevas en vez de la barra persistente: un toast breve
+(`ChatPanel.svelte`'s `approvalToast`, con temporizador propio) que se
+autodescarta a los 6s o en el próximo mensaje enviado o cambio nuevo
+preparado (nunca se apila con la barra real), y una tool nueva
+SOLO-DE-CHAT, `offer_undo_last_change` (`chat/chat-only-tools.ts`, jamás
+registrada en `mcp/tools/index.ts` — invisible para `/api/mcp`), que el
+modelo llama cuando el dueño pide deshacer por chat: solo informa si hay
+algo para deshacer, nunca lo ejecuta. Cuando lo hay,
+`agent.ts`'s `isUndoAvailable` marca el evento `tool_result` con
+`offerUndo: true`, y `MessageBubble.svelte` dibuja un botón "↩ Deshacer"
+en esa burbuja — el clic (y solo el clic) llama al mismo
+`/api/chat/undo` que ya existía. El agente sigue sin poder tocar
+producción por su cuenta; solo puede ofrecer.
+
+(2) El banner de preview tapaba el borde superior de la página real — medido
+en un browser real contra `/trabajos?__preview=...`, el banner (opaco,
+z-index 60) se comía la parte de arriba del propio `<Nav>` (fixed, siempre
+`top: 0`, ajeno al flujo de documento) y, en `/` y `/estudio` (hero a pantalla
+completa, donde el Nav flota TRANSPARENTE arriba del hero a propósito), el
+contenido real quedaba empezando antes de que el banner terminara. Arreglo:
+banner y Nav pasan a ser dos elementos `position: fixed` independientes,
+apilados por altura MEDIDA en el cliente (`bind:clientHeight`, porque el
+texto del banner puede pasar a dos líneas a 375px) — `Nav.svelte` recibe un
+`topOffset` nuevo y `<main>` un `padding-top` igual a esa altura, ambos
+condicionados a `data.preview` para que la única atribución nueva
+(`style="top: …"` / `style="padding-top: …"`) nunca aparezca en una
+respuesta pública sin token de preview.
+
+(3) "No puedo borrar un proyecto publicado desde acá, iniciá sesión en
+`/admin` con permiso de publish" — técnicamente falso (`delete_entry` sobre
+una entry publicada solo marca `pending_delete: true`, no necesita el scope
+`publish`) y lleno de jerga interna. La causa real: el prompt del sistema no
+explicaba en absoluto que borrar un proyecto publicado es posible por chat, y
+el mensaje de rechazo de scope (`tools-bridge.ts`) literalmente mencionaba
+`/admin`/"iniciar sesión". Se reescribieron ambos: el prompt ahora explica
+que borrar (publicado o no) se suma a la MISMA tarjeta con un resumen
+inequívoco ("se va a eliminar — desaparece del sitio al aprobar" —
+`change-card.ts`'s `summarizeChange`), y ninguna respuesta de rechazo
+menciona ya `/admin`, scopes ni "iniciar sesión" en ningún caso, no solo el
+de borrar.
+
+36. **La CACHÉ DE PÁGINA de preview servía HTML truncado, sin `</script>`,
+    en TODO ambiente (no solo dev) — hidratación completamente rota en
+    cualquier preview, desde que la Lane B8 la introdujo.** Encontrado por
+    accidente: el `bind:clientHeight` del defecto (2) nunca actualizaba su
+    valor inicial. `curl` contra `/trabajos?__preview=...` mostró la causa —
+    `Content-Length` correcto y `curl` recibiendo exactamente esa cantidad
+    de bytes, pero el cuerpo cortado a mitad del payload de hidratación, sin
+    cerrar ningún tag. `rewritePreviewResponse` (`hooks.server.ts`) hace
+    `injectPreviewToken` (agrega `?__preview=` a cada link, alargando el
+    body) pero construye la `Response` nueva con `headers: new
+    Headers(response.headers)` — una copia de los headers ORIGINALES,
+    `Content-Length` incluido, que sigue declarando el largo ANTERIOR
+    (más corto) al reescribir. El runtime HTTP corta al largo declarado, no
+    al real. Arreglo: `headers.delete('content-length')` antes de construir
+    la respuesta — la única línea que cambió — dejando que el runtime
+    calcule el framing real (pasa a `Transfer-Encoding: chunked`,
+    confirmado con `curl -D -`). Sin este arreglo, ninguna verificación de
+    esta lane sobre navegación-durante-preview (criterio 7) podía ser real:
+    el listener de clicks de `+layout.svelte` que mantiene el token de
+    preview durante navegación cliente-a-cliente nunca corría.
+
+37. **Un self-fetch de regeneración hardcodeado a `127.0.0.1` nunca conecta
+    contra `vite dev` sin `--host`** — confirmado con `lsof -iTCP
+    -sTCP:LISTEN`: Vite bindea SOLO `::1` (IPv6), nada en `127.0.0.1`.
+    Todo `publish`/`unpublish`/Deshacer en `dev.sh` fallaba con "rendering
+    failed" y se revertía, siempre, sin importar que `PORT` estuviera bien
+    seteado (ver también el arreglo de `dev.sh` en esta misma lane:
+    `process.env.PORT` tampoco estaba seteado, un segundo bug independiente
+    en la misma función). El primer arreglo — cambiar el literal a
+    `localhost` sin más — rompió `verify.sh` en 7 de las 10 rutas: el host
+    donde ese self-fetch conecta queda embebido en la página cacheada
+    (`event.url.origin` → `<link rel="mcp-server">`, la URL del JSON-LD),
+    y `node build`/Railway SÍ conectan bien contra `127.0.0.1` (bindean
+    todas las interfaces), así que cambiar el literal ahí no arregla nada y
+    sí cambia bytes que `verify.sh` compara contra el baseline. Arreglo
+    final: probar `127.0.0.1` primero, y solo si falla la conexión (no si
+    la respuesta es simplemente no-200) reintentar con `localhost` — todo
+    ambiente donde `127.0.0.1` ya funcionaba queda byte-a-byte idéntico
+    (`verify.sh` corrido varias veces seguidas tras el cambio: 0 diffs, sin
+    re-baselinear), y el único que no funcionaba (`vite dev`) queda
+    arreglado. Lección para la skill: un self-fetch hardcodeado a un host
+    de loopback no es un detalle interno inocuo cuando ese mismo host
+    termina en el HTML servido — cambiarlo es un cambio de comportamiento
+    público, hay que probarlo contra el gate real, no asumir que "loopback
+    es loopback".
+
+38. **Deshacer un Aprobar que había PUBLICADO UN BORRADO no podía
+    funcionar con el mecanismo de Deshacer ya existente, porque `publish`
+    no solo cambia columnas en una fila `pending_delete` — la `DELETE`
+    directamente (ver `mcp/tools/publish.ts`'s propia rama).**
+    `restorePublishedSnapshot` (lo que corre `/api/chat/undo`) hacía un
+    `UPDATE ... WHERE id = ...` — sin efecto contra una fila que ya no
+    existe. Arreglo: `routes/api/chat/approve` ahora captura la fila
+    COMPLETA (no solo `publishedData`/`publishedPosition`/`status`) en
+    `approvedSnapshot.deletedRow` cuando la entrada que está por publicar
+    tiene `pendingDelete: true` — esa captura sobrevive el viaje por
+    `chat_conversations.last_published` (jsonb) porque `Date` serializa a
+    ISO por su propio `toJSON()`; `restorePublishedSnapshot`, si
+    `resolveEntry` no encuentra la fila Y el snapshot trae `deletedRow`,
+    la reconstruye (`deserializeEntryRow`, que revierte `createdAt`/
+    `updatedAt` de vuelta a `Date`) y hace `INSERT` en vez de `UPDATE`,
+    corriendo la misma validación de render-o-rollback que cualquier otra
+    escritura acá. Probado de punta a punta con un proyecto de prueba
+    real: crear → aprobar → borrar → aprobar (fila `DELETE`ada de la
+    base, confirmado por SQL directo) → "deshacé el último cambio" →
+    clic → la fila vuelve a existir con el mismo `id`, `pending_delete:
+    false`, publicada, visible en `/trabajos` otra vez. La pérdida
+    conocida y aceptada: `revisions.entry_id` referencia `entries.id` con
+    `onDelete: 'cascade'`, así que el historial de revisiones de esa
+    entrada se pierde en el `DELETE` real y no se reconstruye — mismo
+    límite que ya tenía el rollback INTERNO de `publish` para el mismo
+    caso (su propio `db.insert(entries).values(row)` tampoco reinserta
+    revisiones), no algo nuevo que esta lane haya introducido.
+
+**Evidencia por criterio de aceptación**, probada en un Chrome real
+(`playwright-core`) contra el servidor stub extendido con tres escenarios
+nuevos (crear/borrar un proyecto de prueba, ofrecer deshacer), desktop y
+375px, con medición de DOM real donde una captura de mobile emulado sale
+distorsionada:
+1. Preparar un cambio de texto → Aprobar → la barra desaparece, aparece
+   "✓ Publicado · Deshacer" y se autodescarta, la conversación sigue
+   usable → confirmado en la página real (`curl`) y en la base.
+2. "deshacé el último cambio" → el agente ofrece un botón, nada cambia en
+   la base hasta el clic → clic → la base y la página en vivo revierten
+   (confirmado con un cambio real, no el mismo valor antes/después).
+3. Preparar un cambio → Descartar → barra afuera al instante, borrador
+   igual a lo publicado (confirmado en la base).
+4. Crear un proyecto, aprobarlo, pedir borrarlo → se suma a la tarjeta con
+   "se va a eliminar — desaparece del sitio al aprobar" → el preview
+   (tabs Inicio/Trabajos, sin tab a la página propia del proyecto — ver el
+   defecto de `buildPages` de esta lane) confirma la ausencia (leído el
+   DOM del iframe) → Aprobar → fila borrada de la base, ausente de
+   `/trabajos` y de la home.
+5. Mismo flujo con Descartar → la fila sigue con `pending_delete: false`,
+   publicada, visible.
+6. Borrar, aprobar, Deshacer → la fila vuelve a existir, publicada, visible
+   (defecto #38 de arriba).
+7. Entrar a un preview y navegar Trabajos → Estudio → Trabajos → una
+   tarjeta de proyecto: el banner nunca tapa contenido (medido con
+   `getBoundingClientRect` en cada paso, desktop y 375px con el banner en
+   dos líneas), el modo preview se mantiene en las cuatro páginas
+   (confirmado leyendo `location.href` después de cada click).
+8. `verify.sh`: PASS, 0 diffs, sin re-baselinear (repetido cuatro veces
+   incluida una prueba FAIL→PASS mutando `projects.racebox.title` por SQL
+   directo). `resilience.sh`: PASS (las 6 verificaciones). `browser-nav.sh`:
+   PASS. `npm run build`: éxito (con el entorno exportado, mismo
+   requisito preexistente que ya documenta el defecto #6). `svelte-check`:
+   47 errores, los mismos preexistentes de `@types/node`, cero nuevos.
+
+**Lo que este brief tenía mal**: decía que el problema de "no puedo borrar
+un proyecto publicado" era que la tool no soportaba la operación — la tool
+(`delete_entry`, Lane A8) ya soportaba exactamente esto. El bug real era de
+producto (redacción del prompt y de los mensajes de rechazo) y de un gap
+mecánico específico (deshacer un borrado ya publicado, defecto #38) que
+recién se manifestaba al probar el flujo completo de punta a punta —
+ninguno de los dos se hubiera encontrado sin construir el criterio de
+aceptación 4-6 como una tarea real, no una lectura de código.
+
+**Lo que sigue pendiente de una clave real de Anthropic**: que el modelo
+real elija bien cuándo llamar `offer_undo_last_change` y redacte el
+resumen de una eliminación con el mismo tono/claridad que el stub —
+validado acá solo contra escenarios guionados.
