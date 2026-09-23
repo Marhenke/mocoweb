@@ -17,10 +17,17 @@
 		bubble: ChatBubble;
 		tools: Record<string, ToolActivity>;
 		onRetry?: (bubble: ChatBubble) => void;
+		/** Lane B9 — see `MessageList.svelte`'s header on the same prop. Optional so this component doesn't require it in isolation/tests that don't exercise undo. */
+		onInlineUndo?: (toolId: string) => void;
+		undoBusy?: boolean;
 	}
-	let { bubble, tools, onRetry }: Props = $props();
+	let { bubble, tools, onRetry, onInlineUndo, undoBusy }: Props = $props();
 
 	let toolList = $derived(bubble.toolIds.map((id) => tools[id]).filter((t): t is ToolActivity => !!t));
+	// Lane B9 — at most one `offer_undo_last_change` call per turn in
+	// practice (the model calls it once, gets an answer, replies), but this
+	// takes the first if there's ever more than one rather than assuming.
+	let undoOffer = $derived(toolList.find((t) => t.offerUndo));
 	let html = $derived(bubble.role === 'assistant' && bubble.text ? renderMarkdown(bubble.text) : '');
 
 	let copied = $state(false);
@@ -79,6 +86,27 @@
 
 		{#if bubble.stopped}
 			<div class="stopped-tag">Generación detenida</div>
+		{/if}
+
+		{#if undoOffer}
+			<!--
+				Lane B9 — the click behind "the agent offers an undo the owner
+				clicks" (the brief's own words): the model can only ever REPORT
+				that something is undoable (`offer_undo_last_change`,
+				`chat-only-tools.ts`) — this button, and only a click on it, is
+				what actually calls `/api/chat/undo`. Never auto-shown/auto-
+				clicked; disappears once clicked (`onInlineUndo` clears
+				`offerUndo` on success) or once whatever it pointed at gets
+				undone/re-approved some other way.
+			-->
+			<button
+				type="button"
+				class="inline-undo-btn"
+				onclick={() => onInlineUndo?.(undoOffer.id)}
+				disabled={undoBusy}
+			>
+				{undoBusy ? 'Deshaciendo…' : '↩ Deshacer'}
+			</button>
 		{/if}
 
 		<div class="meta-row">
@@ -250,6 +278,25 @@
 		color: var(--color-muted, #666);
 		margin-top: 0.35em;
 		font-style: italic;
+	}
+
+	.inline-undo-btn {
+		display: block;
+		margin-top: 0.5em;
+		font-family: inherit;
+		font-size: 0.82rem;
+		font-weight: 600;
+		background: var(--color-ink);
+		color: var(--color-cream);
+		border: none;
+		border-radius: 0.6em;
+		padding: 0.5em 0.9em;
+		min-height: 40px;
+		cursor: pointer;
+	}
+	.inline-undo-btn:disabled {
+		opacity: 0.55;
+		cursor: default;
 	}
 
 	.meta-row {

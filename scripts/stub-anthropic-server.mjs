@@ -259,6 +259,83 @@ function plans(intent, message) {
 		}
 	}
 
+	// Lane B9 — "creá un proyecto de prueba": a throwaway `projects` entry
+	// with a fixed, predictable slug, used by the delete/undo scenarios
+	// below and by this lane's own browser verification (create → approve →
+	// ask to delete → approve/discard/undo). Reuses an already-seeded media
+	// path for `bg` (schema validation only checks the shape of the string,
+	// not that upload_media produced it — see `mediaPath` in
+	// `content.schema.ts`) rather than needing a real upload in this
+	// scripted scenario.
+	const TEST_PROJECT_SLUG = 'proyecto-de-prueba-b9';
+	if (text.includes('proyecto de prueba') && !text.includes('borr') && !text.includes('elimin')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [
+				{
+					name: 'create_entry',
+					input: {
+						collection: 'projects',
+						slug: TEST_PROJECT_SLUG,
+						data: {
+							title: 'Proyecto de Prueba B9',
+							category: 'Prueba · QA',
+							year: '2026',
+							client: 'Cliente de Prueba',
+							services: ['Prueba'],
+							bg: '/media/6ff4122f9e636602ecff065d868485947d145f5bc19a96dafc95065157f6f9c8.jpg',
+							ink: '#f4f0e6',
+							summary: 'Proyecto creado solo para probar el flujo de aprobación y borrado.',
+							challenge: 'Verificar que crear, aprobar y borrar un proyecto funciona de punta a punta.',
+							solution: 'Creamos este proyecto de prueba, lo aprobamos y después lo eliminamos.',
+							gallery: []
+						}
+					}
+				}
+			],
+			closingText: () => 'Listo, ya preparé el proyecto de prueba. Revisá la tarjeta de arriba para aprobarlo.'
+		};
+	}
+
+	// Lane B9 — "borrá el proyecto de prueba" / "eliminá el proyecto de
+	// prueba": exercises `delete_entry` against a PUBLISHED entry through the
+	// chat (the bug this lane's brief opens with: the agent used to refuse
+	// this and mention "/admin"/permissions). `delete_entry` on an already-
+	// published entry only ever sets `pendingDelete: true` — see
+	// `mcp/tools/entries.ts` — so this is safe to run against the real test
+	// project regardless of whether it's been approved yet.
+	if ((text.includes('borr') || text.includes('elimin')) && text.includes('proyecto de prueba')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [{ name: 'delete_entry', input: { collection: 'projects', slug: TEST_PROJECT_SLUG } }],
+			closingText: () => 'Listo, preparé la eliminación del proyecto de prueba. Revisá la tarjeta de arriba: se va a eliminar del sitio cuando apruebes.'
+		};
+	}
+
+	// Lane B9 — "deshacé el último cambio": the agent only ever REPORTS
+	// whether something is undoable (`offer_undo_last_change`,
+	// `chat-only-tools.ts`) — never runs the undo itself. `closingText` here
+	// mirrors what `system-prompt.ts` tells a real model to say either way,
+	// and never claims the undo already happened.
+	if (text.includes('deshac') || text.includes('revertí') || text.includes('revertir')) {
+		return {
+			kind: 'tool-then-text',
+			steps: [{ name: 'offer_undo_last_change', input: {} }],
+			closingText: (toolResults) => {
+				const raw = stripUntrustedPrefix(toolResults[0] ?? '{}');
+				let parsed;
+				try {
+					parsed = JSON.parse(raw);
+				} catch {
+					parsed = { available: false };
+				}
+				if (!parsed.available) return 'No hay nada para deshacer ahora mismo.';
+				const label = parsed.entries?.[0]?.label ?? 'lo último aprobado';
+				return `Sí, se puede deshacer: ${label} volvería a como estaba antes. Tocá el botón de abajo para hacerlo.`;
+			}
+		};
+	}
+
 	return {
 		kind: 'text',
 		text:

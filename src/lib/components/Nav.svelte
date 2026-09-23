@@ -1,6 +1,22 @@
 <script lang="ts">
 	import { page } from '$app/state';
 
+	/**
+	 * Lane B9 — how far down (px) this fixed header sits from the top of the
+	 * viewport, instead of always `top: 0`. Only ever set by the root layout
+	 * when a preview banner (`+layout.svelte`'s `.preview-banner`, also
+	 * `position: fixed; top: 0`) is showing above it — see that file's header
+	 * for the overlap bug this fixes. `undefined` on every ordinary public
+	 * page (the vast majority of traffic — no preview token) renders no
+	 * `style` attribute at all, so `.migration/verify.sh`'s byte-for-byte
+	 * baseline of the 10 public routes is untouched; only a page rendered
+	 * with a valid `?__preview=` token gets the inline override.
+	 */
+	interface Props {
+		topOffset?: number;
+	}
+	let { topOffset }: Props = $props();
+
 	let open = $state(false);
 	let scrolled = $state(false);
 
@@ -34,6 +50,7 @@
 	class="fixed inset-x-0 top-0 z-50 transition-all duration-300 {scrolled
 		? 'border-b border-ink/10 bg-cream/80 backdrop-blur-md'
 		: ''}"
+	style={topOffset !== undefined ? `top: ${topOffset}px` : undefined}
 >
 	<nav
 		class="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 transition-all duration-300 sm:px-8 sm:py-5"

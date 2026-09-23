@@ -32,7 +32,23 @@ interface RenderedPage {
 
 async function renderPath(path: string): Promise<RenderedPage | null> {
 	const port = process.env.PORT || '3000';
-	const url = `http://127.0.0.1:${port}${path}`;
+	// `localhost`, not the IPv4 literal `127.0.0.1` — found while testing Lane
+	// B9's Aprobar flow against `vite dev` (what `dev.sh` runs): Vite's dev
+	// server, with no `--host` flag, binds ONLY the IPv6 loopback (`::1`) —
+	// confirmed with `lsof -iTCP -sTCP:LISTEN`, showing `TCP localhost:5180`
+	// as an IPv6 socket and nothing on `127.0.0.1:5180` at all. A hardcoded
+	// `127.0.0.1` self-fetch against that dev server always fails to connect
+	// (`ECONNREFUSED`), which `renderPath`'s catch below silently turns into
+	// "render failed" — so EVERY publish/unpublish/undo in dev was refused
+	// and rolled back, 100% of the time, regardless of PORT being correct.
+	// `adapter-node` production (what Railway runs) binds all interfaces, so
+	// this never showed up there. `localhost` resolves correctly against
+	// EITHER server (confirmed with `node -e "dns.lookup('localhost',
+	// {all:true}, ...)"`, which returns `::1` first on this machine, and a
+	// direct curl against `http://localhost:<port>` succeeding in both
+	// dev and prod), so it replaces the IPv4 literal here instead of adding a
+	// second, environment-specific code path.
+	const url = `http://localhost:${port}${path}`;
 	try {
 		const res = await fetch(url, { headers: internalRenderHeaders() });
 		if (!res.ok) return null;

@@ -68,11 +68,22 @@ export interface ChangeCardEntry {
 	 * `publishedData`/`publishedPosition`/`status` were immediately BEFORE
 	 * this entry's publish, so "Deshacer" can restore exactly that. Absent
 	 * on a still-pending (not yet approved) entry.
+	 *
+	 * `deletedRow` (Lane B9) is set ONLY when this approval published a
+	 * PENDING DELETE — `publish` (`mcp/tools/publish.ts`) doesn't just
+	 * change columns on a deletion, it `DELETE`s the row outright (see that
+	 * tool's own doc comment: "the next publish call... is what actually
+	 * removes the row"). Restoring `publishedData`/`publishedPosition`/
+	 * `status` with a plain `UPDATE` is meaningless against a row that no
+	 * longer exists, so "Deshacer" on a deletion needs the FULL row snapshot
+	 * to re-`INSERT` instead — captured here, before the delete happens, and
+	 * consumed by `restorePublishedSnapshot` in `mcp/tools/publish.ts`.
 	 */
 	approvedSnapshot?: {
 		publishedData: unknown;
 		publishedPosition: number | null;
 		status: string;
+		deletedRow?: Record<string, unknown> | null;
 	} | null;
 }
 
@@ -152,7 +163,12 @@ function summarizeChange(
 	isNew: boolean,
 	isDeletion: boolean
 ): string {
-	if (isDeletion) return 'se va a borrar';
+	// Lane B9 — deleting is destructive, so this summary has to be unmistakable
+	// about what disappears (the brief's own words) rather than a generic
+	// "changed" line — deliberately the ONLY summary that names the outcome
+	// instead of the kind of edit, since "changed" and "about to be removed
+	// entirely" are not the same risk level.
+	if (isDeletion) return 'se va a eliminar — desaparece del sitio al aprobar';
 	if (isNew || !before) return 'contenido nuevo';
 
 	const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
@@ -208,12 +224,28 @@ function pageLabel(pattern: string): string {
 	return PAGE_LABELS[pattern] ?? pattern;
 }
 
-async function buildPages(origin: string, collectionKey: string, slug: string | null): Promise<ChangeCardPage[]> {
+async function buildPages(
+	origin: string,
+	collectionKey: string,
+	slug: string | null,
+	isDeletion: boolean
+): Promise<ChangeCardPage[]> {
 	const token = signPreviewToken();
 	const routes = routesForCollection(collectionKey);
 	const out: ChangeCardPage[] = [];
 	for (const route of routes) {
 		if (route.dynamic && !slug) continue; // can't build a per-entry preview link without a slug
+		// Lane B9 — a deleted entry's OWN dynamic page (e.g. `/trabajos/{slug}`)
+		// is excluded from the draft read `content.ts` uses for preview
+		// (`fetchList`'s `ne(entries.pendingDelete, true)`, same rule
+		// `preview_url`'s own doc comment already states) — visiting it in
+		// preview mode 404s, same as it will for real once this is approved.
+		// Linking "Ver preview" there by default would show an error page
+		// instead of the removal; the collection's LIST route (e.g.
+		// `/trabajos`, always present earlier in `routesForCollection`'s
+		// order for anything with a dynamic route) is what actually shows the
+		// entry now missing, so it stays the only page offered here.
+		if (route.dynamic && isDeletion) continue;
 		const path = route.dynamic ? route.pattern.replace('{slug}', slug as string) : route.pattern;
 		out.push({
 			pattern: route.pattern,
@@ -266,7 +298,12 @@ export async function buildChangeCardEntry(
 	const after = row.data as Record<string, unknown>;
 	const before = (row.publishedData as Record<string, unknown> | null) ?? null;
 	const isNew = row.publishedData === null && !row.pendingDelete;
-	const pages = await buildPages(origin, ref.collection, collection.kind === 'singleton' ? null : row.slug);
+	const pages = await buildPages(
+		origin,
+		ref.collection,
+		collection.kind === 'singleton' ? null : row.slug,
+		row.pendingDelete
+	);
 
 	return {
 		collection: ref.collection,

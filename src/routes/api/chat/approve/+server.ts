@@ -60,7 +60,18 @@ export const POST: RequestHandler = async ({ request }) => {
 		const row = await resolveEntry(collection, { slug: entryCard.slug ?? undefined });
 		if (!row) continue; // vanished since the card was built — nothing to publish
 
-		const snapshot = { publishedData: row.publishedData, publishedPosition: row.publishedPosition, status: row.status };
+		const snapshot = {
+			publishedData: row.publishedData,
+			publishedPosition: row.publishedPosition,
+			status: row.status,
+			// Lane B9 — see `ChangeCardEntry.approvedSnapshot`'s doc comment in
+			// `change-card.ts`: this call is about to HARD-DELETE `row`
+			// (`publish`'s pendingDelete branch), so "Deshacer" later can't
+			// restore it with a plain column update — it needs the whole row
+			// to re-insert. Captured BEFORE the delete, from the same `row`
+			// this snapshot's other fields already came from.
+			deletedRow: row.pendingDelete ? (row as unknown as Record<string, unknown>) : null
+		};
 		const outcome = await publishTool.handler(
 			{ collection: entryCard.collection, ...(entryCard.slug ? { slug: entryCard.slug } : {}) },
 			ctx

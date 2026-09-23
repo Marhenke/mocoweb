@@ -109,6 +109,43 @@
 	// PASS again) — see the report for that evidence. Any route added
 	// under `{:else}` renders byte-identically to before this change.
 	let isAdmin = $derived(page.url.pathname === '/admin' || page.url.pathname.startsWith('/admin/'));
+
+	// ── Lane B9: the preview banner must never cover page content ───────────
+	// The bug: `Nav.svelte`'s `<header>` is `position: fixed; top: 0` — always
+	// drawn at the very top of the VIEWPORT, completely independent of
+	// document flow. The banner below used to be `position: sticky; top: 0`,
+	// a normal-flow element placed just before `<Nav>` — pushing `<main>`'s
+	// start down by the banner's own height, but doing nothing at all for
+	// `Nav`, which stayed glued to viewport y=0 regardless. Measured in a
+	// real browser against a live preview (`/trabajos?__preview=...`): the
+	// banner (z-index 60, opaque lime) painted over roughly the top third of
+	// Nav's logo/links/CTA button (Nav's own content sits around
+	// `top:20px..bottom:60px` inside its 80px-tall fixed header, and the
+	// banner covered `0..36px`) — confirmed with `getBoundingClientRect()` on
+	// each nav link, not just eyeballed. On the two full-bleed-hero pages
+	// (`/`, `/estudio`, where Nav is DESIGNED to float transparently over the
+	// hero — see `overHero` in `Nav.svelte`) the same math meant the banner
+	// additionally sat on top of the very start of the hero itself.
+	//
+	// Fix: both the banner and `Nav` become independent viewport-fixed
+	// elements, stacked top-to-bottom by JS-measured height (`bannerHeight`,
+	// via `bind:clientHeight` — the banner's own text can wrap to 2 lines at
+	// 375px, so a hardcoded pixel guess would be wrong at some width) rather
+	// than relying on document flow (which `Nav` was never part of to begin
+	// with): `Nav` receives `topOffset={bannerHeight}` and renders `top:
+	// {bannerHeight}px` instead of `top: 0` (see that component), and `<main>`
+	// gets `padding-top: {bannerHeight}px` so EVERY existing page's own
+	// internal top padding/margin (already tuned to clear Nav's height alone,
+	// full-bleed-hero pages included, where that "padding" is deliberately
+	// zero) now starts that same distance further down, directly below Nav
+	// instead of before it. No per-page change needed either way.
+	//
+	// Both additions are conditioned on `data.preview` (`topOffset` is
+	// `undefined`, the style attribute on `<main>` is omitted entirely) so
+	// `.migration/verify.sh`'s byte-for-byte baseline of the 10 public routes
+	// — none of which ever carry a preview token — is untouched; confirmed by
+	// running it after this change with zero re-baselining.
+	let bannerHeight = $state(44);
 </script>
 
 <svelte:head>
@@ -124,13 +161,13 @@
 	{@render children()}
 {:else}
 	{#if data.preview}
-		<div class="preview-banner" role="status">
+		<div class="preview-banner" role="status" bind:clientHeight={bannerHeight}>
 			<span>👁️ Estás viendo una <strong>vista previa</strong> — nadie más ve esto todavía.</span>
 			<a href={exitHref} data-preview-exit>Salir de la vista previa</a>
 		</div>
 	{/if}
-	<Nav />
-	<main>
+	<Nav topOffset={data.preview ? bannerHeight : undefined} />
+	<main style={data.preview ? `padding-top: ${bannerHeight}px` : undefined}>
 		{@render children()}
 	</main>
 	<Footer />
@@ -138,9 +175,9 @@
 
 <style>
 	.preview-banner {
-		position: sticky;
-		top: 0;
-		z-index: 60;
+		position: fixed;
+		inset: 0 0 auto 0;
+		z-index: 70;
 		display: flex;
 		align-items: center;
 		justify-content: center;
