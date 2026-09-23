@@ -1003,7 +1003,7 @@
 		border: 1px solid color-mix(in srgb, var(--color-ink) 25%, transparent);
 		border-radius: 0.6em;
 		padding: 0.35em 0.8em;
-		min-height: 36px;
+		min-height: 44px;
 		cursor: pointer;
 		color: var(--color-ink);
 	}

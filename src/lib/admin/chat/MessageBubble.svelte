@@ -291,7 +291,7 @@
 		border: none;
 		border-radius: 0.6em;
 		padding: 0.5em 0.9em;
-		min-height: 40px;
+		min-height: 44px;
 		cursor: pointer;
 	}
 	.inline-undo-btn:disabled {
